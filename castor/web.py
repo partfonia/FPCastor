@@ -61,6 +61,8 @@ class WebServer:
 
     def start(self):
         host, port = self.app.cfg.get("web.host", "0.0.0.0"), int(self.app.cfg.get("web.port", 8765))
+        if os.environ.get("SERVER_PORT", "").isdigit():  # хостинги с панелью (Pterodactyl и т.п.) выдают свой порт
+            port = int(os.environ["SERVER_PORT"])
         try:
             self.httpd = ThreadingHTTPServer((host, port), self._make_handler())
         except OSError as e:

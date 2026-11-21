@@ -216,8 +216,8 @@ def _step_platform(cfg: Config, platform: str, n: int):
                    f"Подключить {'FunPay' if fp else 'Playerok'}?", default=fp and not accs):
         return
     if not fp:
-        with Spinner("Проверяю компоненты для Playerok (при первом запуске — до минуты)…"):
-            ready, why = playerok_status()
+        info("Проверяю компоненты для Playerok — при первом запуске это может занять до минуты")
+        ready, why = playerok_status()
         if not ready:
             bad(f"Playerok сейчас подключить нельзя: {why}")
             info("FunPay и всё остальное будут работать. Playerok можно подключить позже — в мини-аппе или здесь же")
@@ -315,8 +315,8 @@ def _step_telegram(cfg: Config, n: int):
             try:
                 me = _tg(token, "getMe", proxy)
                 err = None if me.get("ok") else me.get("description", "Telegram отклонил токен")
-            except Exception as e:
-                me, err = {}, f"нет связи с Telegram ({type(e).__name__})"
+            except Exception:
+                me, err = {}, "нет связи с Telegram"
         if not err:
             break
         bad(err)

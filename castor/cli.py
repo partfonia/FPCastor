@@ -1,7 +1,6 @@
 """Консоль: меню при запуске, мастер настройки, автозапуск, точка входа."""
 from __future__ import annotations
 
-import getpass
 import os
 import queue
 import re
@@ -115,16 +114,12 @@ def mask(s: str) -> str:
 
 
 def ask_secret(question, validate=None, hint="", allow_empty=False) -> str:
-    """Скрытый ввод (как пароль) + проверка формата."""
+    """Ввод ключа/токена (виден на экране) + проверка формата."""
     if hint:
         info(hint)
-    info("Вставьте и нажмите Enter. Символы не отображаются — так и задумано, ключ не видно на экране")
+    info("Вставьте и нажмите Enter (правая кнопка мыши или Ctrl+V)")
     while True:
-        try:
-            v = getpass.getpass(f"  {YEL}?{R} {question}: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            v = ""
+        v = _input(f"  {YEL}?{R} {question}: ").strip()
         if not v:
             if allow_empty:
                 return ""
@@ -138,7 +133,7 @@ def ask_secret(question, validate=None, hint="", allow_empty=False) -> str:
                 continue
             if not ask_yes("Всё равно сохранить как есть?", False):
                 return ""
-        ok(f"Принято: {mask(v)} ({len(v)} {plural(len(v), 'символ', 'символа', 'символов')})")
+        ok(f"Принято ({len(v)} {plural(len(v), 'символ', 'символа', 'символов')})")
         return v
 
 

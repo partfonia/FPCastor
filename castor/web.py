@@ -121,7 +121,8 @@ class WebServer:
     GET_PERM = {"me": None, "status": "orders", "config": "settings", "events": "chat", "logs": "system",
                 "plugins": "plugins", "products": "products", "orders": "orders", "customers": "customers",
                 "chats": "chat", "chat": "chat", "proxy": "system", "backups": "secrets", "lots": "delivery",
-                "suppliers/pending": "delivery", "withdraw": "withdraw", "finance": "finance", "team": "users"}
+                "suppliers/pending": "delivery", "withdraw": "withdraw", "finance": "finance", "team": "users",
+                "modules": "settings"}
     POST_PERM = {"config": "settings", "send": "chat", "products": "products", "products/delete": "delivery",
                  "plugins/toggle": "plugins", "plugins/delete": "plugins", "plugins/reload": "plugins",
                  "plugins/upload": "plugins", "plugins/url": "plugins", "customers/note": "customers",
@@ -131,7 +132,7 @@ class WebServer:
                  "supplier/test": "delivery", "supplier/resolve": "delivery", "withdraw/run": "withdraw",
                  "withdraw/unpause": "withdraw", "withdraw/plan": "withdraw", "order/cost": "finance",
                  "order/refund": "refund", "team/invite": "users", "team/role": "users", "team/remove": "users",
-                 "accounts/sync": "settings"}
+                 "accounts/sync": "settings", "modules/action": "settings"}
     ACTION_PERM = {"raise": "settings", "restart": "system", "backup": "secrets", "vacation": "settings",
                    "test_delivery": "delivery", "report": "finance"}
 
@@ -166,6 +167,8 @@ class WebServer:
             if lvl:
                 lines = [x for x in lines if f"[{lvl}]" in x]
             return {"logs": lines}
+        if p == "modules":
+            return {"modules": app.modules.describe()}
         if p == "plugins":
             return {"plugins": [i.to_dict(app.plugins.enabled(u)) for u, i in app.plugins.plugins.items()],
                     "failed": app.plugins.failed}
@@ -319,6 +322,11 @@ class WebServer:
             cfg.save()
             ok, info = app.reload_telegram()
             return {"ok": ok, "message": info}
+        if p == "modules/action":
+            m = app.modules.get(str(b.get("key", "")))
+            if not m:
+                return {"error": "Нет такого модуля"}
+            return {"ok": True, "message": m.run_action(str(b.get("action", "")), [str(x) for x in b.get("args", [])])}
         if p == "proxy/parse":
             good, bad = split_proxies(b.get("text", ""), b.get("kind") or None)
             return {"items": [{"proxy": x, "label": proxy_label(x), "desc": describe_proxy(x)} for x in good],

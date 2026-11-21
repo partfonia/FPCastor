@@ -56,6 +56,8 @@ class App:
         self.webhooks = Webhooks(self)
         self.lowstock = LowStock(self)
         self.scheduler = Scheduler(self)
+        from .modules import ModuleManager
+        self.modules = ModuleManager(self)
         self.stock = StockManager(self)
         self.suppliers = Suppliers(self)
         self.withdraw = WithdrawManager(self)
@@ -304,6 +306,8 @@ class App:
             if not self.state.get("away", key):
                 self.state.mark("away", key)
                 self.auto_send(p, m.chat_id, away_text, m.chat_name, acc)
+        if self.modules.on_message(m):  # !guard, !код и т.п. — модули отвечают сами
+            return
         if cfg.get(f"{p}.auto_reply", True):
             txt = m.text.strip().lower()
             for c in cfg.get("commands", []):
@@ -356,6 +360,8 @@ class App:
         if cfg.get("features.vacation.enabled") and cfg.get("features.vacation.disable_delivery"):
             return
         acc_cfg = cfg.account(acc) or {}
+        if self.modules.on_order(o):  # аренда и другие модули выдают сами
+            return
         if cfg.get(f"{p}.auto_delivery", True) and acc_cfg.get("auto_delivery", True):
             self.deliver(o)
 

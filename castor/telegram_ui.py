@@ -90,7 +90,7 @@ NOTIFY_NAMES = {
 
 # какое право нужно для callback-действия (duo:<действие>:…)
 CB_PERM = {
-    "main": None, "m2": None, "gsw": "settings", "sec": None, "accs": "settings", "noop": None, "cancel": None, "about": None, "help": None, "set": None, "shops": "settings", "webapp": None,
+    "main": None, "mods": "settings", "mod": "settings", "m2": None, "gsw": "settings", "sec": None, "accs": "settings", "noop": None, "cancel": None, "about": None, "help": None, "set": None, "shops": "settings", "webapp": None,
     "tunnel": "system", "tmode": "system", "ps": None, "wdm": "withdraw", "oos": "delivery", "wm": "settings", "wmp": "settings", "status": "orders", "stats": "finance", "fin": "finance",
     "reply": "chat", "tpl": "chat", "tps": "chat", "cust": "customers",
     "refund": "refund", "refund2": "refund", "plsent": "delivery", "manual": "delivery",
@@ -404,6 +404,7 @@ class TelegramUI:
                  [("✅ Ответ на подтверждение", "duo:sec:confirm", "settings")],
                  [("⭐ Ответ на отзывы", "duo:sec:reviews", "settings")],
                  [("📊 Статистика", "duo:fin", "finance")],
+                 [("🧩 Модули: аренда, коды с почты, автоцена…", "duo:mods", "settings")],
                  [("Далее ▶️", "duo:m2")]]
         return text, rows
 
@@ -543,6 +544,57 @@ class TelegramUI:
             r = [[(b[0], b[1].replace(":fp-lots", ":sec-lots"), *b[2:]) for b in row] for row in r[:-1]] + [back]
             return t, r
         return "Раздел не найден", [back]
+
+    # ═══════════════ встроенные модули ═══════════════
+    def mods_menu(self):
+        text = "<b>🧩 Модули</b>\n\nДополнительные функции. Нажмите на модуль, чтобы включить и настроить.\n"
+        rows = []
+        for d in self.app.modules.describe():
+            text += f"\n{d['icon']} <b>{esc(d['name'])}</b> {'🟢' if d['enabled'] else '⚪️'}\n<i>{esc(d['description'])}</i>\n"
+            rows.append([(f"{d['icon']} {d['name']} {'🟢' if d['enabled'] else '⚪️'}", f"duo:mod:{d['key']}", "settings")])
+        rows.append([("🔌 Свои плагины", "duo:plg:0", "plugins")])
+        rows.append([("◀️ Назад", "duo:main")])
+        return text, rows
+
+    def mod_card(self, key):
+        m = self.app.modules.get(key)
+        if not m:
+            return "Модуль не найден", [[("◀️ Модули", "duo:mods")]]
+        cfg = m.cfg
+        text = (f"<b>{m.ICON} {esc(m.NAME)}</b> {'🟢 включён' if m.enabled else '⚪️ выключен'}\n\n{esc(m.DESCRIPTION)}\n")
+        st = self.app.modules._safe(m, "status")
+        if st:
+            text += f"\n📊 <b>Сейчас:</b> {esc(st)}\n"
+        rows = [[(f"{'🔴 Выключить' if m.enabled else '🟢 Включить'} модуль", f"duo:t:modules.{key}.enabled:mod-{key}", "settings")]]
+        items_note = []
+        for f in m.FIELDS:
+            path, label, typ = f[0], f[1], f[2]
+            full = f"modules.{key}.{path}"
+            val = cfg.get(path)
+            if typ == "bool":
+                rows.append([(f"{'🟢' if val else '🔴'} {label}", f"duo:t:{full}:mod-{key}", "settings")])
+            elif typ == "select":
+                opts = f[3]
+                cur = next((n for v, n in opts if v == val), val)
+                rows.append([(f"🔁 {label}: {cur}", f"duo:mod:{key}:sel:{path}", "settings")])
+            elif typ in ("text", "area", "number"):
+                shown = str(val if val is not None else "")
+                if typ != "area":
+                    text += f"・ {esc(label)}: <code>{esc(shown[:60])}</code>\n"
+                rows.append([(f"✏️ {label}", f"duo:e:{full}", "settings")])
+            elif typ in ("items", "lines"):
+                n = len(val or [])
+                items_note.append(f"{label}: {n}")
+        if items_note:
+            text += "\n<b>Списки</b> (удобнее настраивать в 📱 панели → Настройки → Модули):\n" + \
+                "\n".join(f"・ {esc(x)}" for x in items_note) + "\n"
+            url = self.app.public_url
+            if url.startswith("https://"):
+                rows.append([("📱 Настроить в панели", ("webapp", url))])
+        for aid, label in (self.app.modules._safe(m, "actions") or []):
+            rows.append([(label, f"duo:mod:{key}:act:{aid}"[:64], "settings")])
+        rows.append([("◀️ Модули", "duo:mods")])
+        return text, rows
 
     def accs_menu(self, uid):
         c = self.cfg
@@ -1762,6 +1814,9 @@ class TelegramUI:
         if ret.startswith("duo:sec:"):
             t, r = self.section(ret.split(":")[2], uid)
             self.send(m.chat.id, "✅ Сохранено\n\n" + t, r, uid)
+        elif ret.startswith("duo:mod:"):
+            t, r = self.mod_card(ret.split(":")[2])
+            self.send(m.chat.id, "✅ Сохранено\n\n" + t, r, uid)
         elif hub and sec:
             t, r = self.platform_section(hub, sec, uid)
             self.send(m.chat.id, "✅ Сохранено\n\n" + t, r, uid)
@@ -1786,7 +1841,7 @@ class TelegramUI:
             return
         if a in ("cmds", "dlv"):
             screens[a] = (lambda f, b: (lambda: f(b)))(screens[a], self._back(uid))
-        if a in ("main", "m2", "gsw", "sec", "accs", "ntf", "cmds", "dlv", "prx", "webapp", "team", "wm", "fin",
+        if a in ("main", "m2", "gsw", "sec", "accs", "mods", "mod", "ntf", "cmds", "dlv", "prx", "webapp", "team", "wm", "fin",
                  "plg", "feat", "gen", "cust", "about", "help"):
             self._ret[uid] = c.data  # куда вернуться после правки текста/числа
         if a == "main":
@@ -1805,6 +1860,33 @@ class TelegramUI:
             self.edit(c, *self.section(parts[2], uid))
         elif a == "accs":
             self.edit(c, *self.accs_menu(uid))
+        elif a == "mods":
+            self.edit(c, *self.mods_menu())
+        elif a == "mod":
+            key = parts[2]
+            m = self.app.modules.get(key)
+            sub = parts[3] if len(parts) > 3 else ""
+            if m and sub == "sel":
+                path = parts[4]
+                f = next((x for x in m.FIELDS if x[0] == path), None)
+                if f:
+                    vals = [v for v, _ in f[3]]
+                    cur = m.cfg.get(path)
+                    nxt = vals[(vals.index(cur) + 1) % len(vals)] if cur in vals else vals[0]
+                    self.cfg.set(f"modules.{key}.{path}", nxt)
+            elif m and sub in ("act", "free"):
+                aid = parts[4] if sub == "act" else "free"
+                args = parts[5:] if sub == "act" else parts[4:]
+                res = m.run_action(aid, args)
+                if len(res) > 180:
+                    bot.answer_callback_query(c.id, "Готово — ответ ниже")
+                    self.send(cid, f"{m.ICON} <b>{esc(m.NAME)}</b>\n\n{esc(res)[:3800]}", [[("◀️ Модуль", f"duo:mod:{key}")]], uid)
+                    return
+                bot.answer_callback_query(c.id, res, show_alert=True)
+                if sub == "free" and c.message and "Смените пароль" in (getattr(c.message, "text", "") or ""):
+                    self.edit(c, (getattr(c.message, "text", "") or "")[:1500] + "\n\n✅ Аккаунт снова в работе", [])
+                    return
+            self.edit(c, *self.mod_card(key))
         elif a == "set":
             self.edit(c, *self.settings_menu(uid))
         elif a == "tmode":
@@ -1880,6 +1962,8 @@ class TelegramUI:
                 self.edit(c, *self.gsw_menu())
             elif back.startswith("sec-"):
                 self.edit(c, *self.section(back[4:], uid))
+            elif back.startswith("mod-"):
+                self.edit(c, *self.mod_card(back[4:]))
             elif back == "set":
                 self.edit(c, *self.settings_menu(uid))
             elif back in ("fp", "pl"):

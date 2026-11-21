@@ -243,12 +243,14 @@ DEFAULT_CONFIG: dict = {
          "text": "Я позвал продавца, он скоро ответит 🙌"},
     ],
     "delivery": [],
+    # встроенные модули (аренда, коды с почты, автоцена…): настройки по умолчанию добавляет сам модуль
+    "modules": {},
     "blacklist": {"users": [], "block_delivery": True, "block_reply": True},
     "templates": ["Здравствуйте! Уже смотрю.", "Секунду, проверяю заказ.", "Спасибо за покупку!"],
     "plugins": {"disabled": []},
 }
 
-SECRET_KEYS = {"golden_key", "token", "cookies", "password", "headers", "wallet", "api_key"}
+SECRET_KEYS = {"golden_key", "token", "cookies", "password", "headers", "wallet", "api_key", "shared_secret"}
 _cfg_lock = threading.RLock()
 
 

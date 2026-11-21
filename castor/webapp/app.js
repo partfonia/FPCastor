@@ -456,7 +456,8 @@ function more() {
       can("system") && link("🌐", "Бот и прокси", STATUS && STATUS.telegram.username ? "@" + H(STATUS.telegram.username) : "", "push(botView)"),
       can("system") && link("📱", "Доступ к панели", "пароль, адрес", "push(accessView)"),
       can("users") && link("👨‍💼", "Команда", "помощники и их права", "push(teamView)"),
-      can("plugins") && link("🧩", "Плагины", "", "push(pluginsView)"),
+      set && link("🧩", "Модули", "аренда, коды с почты, автоцена, расписание лотов…", "push(modulesView)"),
+      can("plugins") && link("🔌", "Свои плагины", "Cardinal, Castor, Playerok Universal", "push(pluginsView)"),
       can("delivery") && set && link("🏭", "Поставщики (API)", `${(CFG.suppliers || []).length} шт`, "push(suppliersView)")]) +
     g([
       can("secrets") && link("💾", "Бекапы", "", "push(backupsView)"),
@@ -465,6 +466,55 @@ function more() {
       link("ℹ️", "О боте", `${H((ME.app || {}).name || "")} v${H((ME.app || {}).version || "")}`, "push(aboutView)")]) +
     `<p class="hint" style="margin:10px 6px">Вы вошли как <b>${H(ME.role_name)}</b>.</p>`);
 }
+/* ───────── встроенные модули ───────── */
+let MODS = [];
+async function modulesView() {
+  const j = await api("modules"); MODS = j.modules || [];
+  view(`${title("Модули")}<p class="hint" style="margin:0 6px 10px">Дополнительные функции бота. Включите нужные и настройте.</p>
+    <div class="group">${MODS.map(m => `<button class="item" onclick="push(moduleView,'${m.key}')"><span class="ic">${m.icon}</span>
+      <span class="tx"><b>${H(m.name)}</b><span>${getPath("modules." + m.key + ".enabled") ? "🟢 " + H(m.status || "включён") : "выключен"}</span></span><span class="chev">›</span></button>`).join("")}</div>
+    <p class="hint" style="margin:10px 6px">Свои плагины — в «Настройки → Свои плагины».</p>`);
+}
+function modField(base, f) {
+  const [path, label, type, extra] = f, P = base + "." + path;
+  if (type === "bool") return tog(P, H(label));
+  if (type === "select") return `<div class="field"><label>${H(label)}</label><select onchange="setPath('${P}',this.value)">${extra.map(([v, n]) => `<option value="${H(v)}" ${getPath(P) === v ? "selected" : ""}>${H(n)}</option>`).join("")}</select></div>`;
+  if (type === "lines") return lines(P, H(label), extra ? H(extra) : "");
+  if (type === "secret") return fld(P, H(label), "secret", extra ? H(extra) : "");
+  return fld(P, H(label), type === "area" ? "area" : type === "number" ? "number" : "text", extra ? H(extra) : "");
+}
+function moduleView(key) {
+  const m = MODS.find(x => x.key === key); if (!m) return;
+  const base = "modules." + key;
+  const items = m.fields.filter(f => f[2] === "items"), simple = m.fields.filter(f => f[2] !== "items");
+  view(`${title(m.icon + " " + m.name)}<p class="hint" style="margin:0 6px 10px">${H(m.description)}</p>
+    <div class="group">${tog(base + ".enabled", "Модуль включён", H(m.status || ""))}</div>
+    ${items.map(f => { const list = getPath(base + "." + f[0]) || [], sub = m.item_fields[f[0]] || [];
+      return `<h3>${H(f[1])} · ${list.length}</h3>${list.map((it, i) => `<div class="group" style="margin-bottom:8px">
+        ${sub.map(sf => modField(base + "." + f[0] + "." + i, sf)).join("")}
+        <div class="field"><button class="btn danger sm" onclick="delModItem('${key}','${f[0]}',${i})">Удалить</button></div></div>`).join("")}
+        <button class="btn ghost wide" style="margin-bottom:12px" onclick="addModItem('${key}','${f[0]}')">➕ Добавить</button>`; }).join("")}
+    ${simple.length ? `<h3>Настройки</h3><div class="group">${simple.map(f => modField(base, f)).join("")}</div>` : ""}
+    ${m.actions.length ? `<h3>Действия</h3><div class="group">${m.actions.map(([id, label]) => `<button class="item" onclick="modAct('${key}','${id}')"><span class="tx"><b>${H(label)}</b></span><span class="chev">›</span></button>`).join("")}</div>` : ""}
+    <p class="hint" style="margin:10px 6px">Изменения применяются после «Сохранить».</p>`);
+}
+function addModItem(key, list) {
+  const m = MODS.find(x => x.key === key), sub = m.item_fields[list] || [];
+  const it = {id: Math.random().toString(36).slice(2, 10)};
+  sub.forEach(([k, , t]) => it[k] = t === "bool" ? true : t === "number" ? (k === "port" ? 993 : k === "hours_per_unit" ? 1 : 0) : t === "lines" ? [] : "");
+  const arr = getPath("modules." + key + "." + list) || []; arr.push(it); setPath("modules." + key + "." + list, arr);
+  moduleView(key);
+}
+function delModItem(key, list, i) {
+  confirmBox("Удалить запись?").then(ok => { if (!ok) return; const arr = getPath("modules." + key + "." + list) || []; arr.splice(i, 1); setPath("modules." + key + "." + list, arr); moduleView(key); });
+}
+async function modAct(key, id) {
+  const [action, ...args] = id.split(":");
+  const j = await api("modules/action", {key, action, args});
+  if (j.message) { j.message.length > 120 ? confirmBox(j.message) : toast(j.message); }
+  const r = await api("modules"); MODS = r.modules || []; moduleView(key);
+}
+
 /* Глобальные переключатели: строка — функция, справа FunPay и Playerok */
 function switchesView() {
   const row = (label, a, b) => `<div class="item sw2"><div class="tx"><b>${label}</b></div>

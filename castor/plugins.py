@@ -187,6 +187,9 @@ class PluginManager:
                 log.warning("Плагин %s: UUID уже занят — пропущен", info.name)
                 return None
             self.plugins[info.uuid] = info
+            mod_cls = getattr(mod, "CASTOR_MODULE", None)  # плагин со своим экраном настроек, как у встроенных модулей
+            if mod_cls is not None and getattr(self.app, "modules", None):
+                self.app.modules.register(mod_cls)
             log.info("🧩 Плагин загружен: %s v%s (%s)", info.name, info.version, kind)
             return info
         except Exception as e:

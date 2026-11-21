@@ -104,6 +104,10 @@ class Scheduler:
     def tick(self):
         cfg = self.app.cfg
         try:
+            self.app.modules.tick()
+        except Exception as e:
+            log.warning("Модули: %s", e)
+        try:
             self.app.withdraw.tick()
         except Exception as e:
             log.warning("Автовывод: %s", e)

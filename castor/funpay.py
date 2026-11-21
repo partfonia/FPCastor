@@ -585,6 +585,86 @@ class FunPayClient:
             raise FunPayError("FunPay принял запрос, но состояние лота не изменилось")
         return True
 
+    # ═════════ цены и копирование лотов (модули «Автоцена» и «Копирование лотов») ═════════
+    def get_public_offers(self, node) -> list:
+        """Предложения всех продавцов в разделе: id, цена для покупателя, продавец, онлайн ли."""
+        r = self._req("GET", f"/lots/{node}/")
+        soup = BeautifulSoup(r.text, "html.parser")
+        out = []
+        for a in soup.find_all("a", class_="tc-item"):
+            m = re.search(r"offer\?id=(\d+)", a.get("href", ""))
+            price = a.find(class_="tc-price")
+            if not m or not price:
+                continue
+            try:
+                val = float(str(price.get("data-s") or re.sub(r"[^\d.,]", "", price.text)).replace(",", ".").replace(" ", ""))
+            except ValueError:
+                continue
+            user = a.find(class_="media-user-name")
+            out.append({"id": m.group(1), "price": val, "seller": user.text.strip() if user else "",
+                        "online": a.get("data-online") == "1",
+                        "title": (a.find(class_="tc-desc-text").text.strip() if a.find(class_="tc-desc-text") else "")})
+        return out
+
+    def _save_form(self, fields: list) -> dict:
+        if not any(k == "csrf_token" for k, _ in fields):
+            fields.append(("csrf_token", self.csrf_token))
+        r = self._req("POST", "/lots/offerSave", data=fields, headers=self._xhr_headers())
+        try:
+            j = r.json()
+        except Exception:
+            j = {}
+        if j.get("error") or j.get("errors"):
+            raise FunPayError(f"FunPay не сохранил лот: {j.get('error') or j.get('errors')}")
+        return j
+
+    def get_lot_price(self, lot_id) -> Optional[float]:
+        for k, v in self.get_lot_form(lot_id):
+            if k == "price":
+                try:
+                    return float(str(v).replace(",", "."))
+                except ValueError:
+                    return None
+        return None
+
+    def set_lot_price(self, lot_id, price: float) -> bool:
+        """Меняет цену лота (цена «вам на баланс», как в форме FunPay)."""
+        fields, seen = [], False
+        for k, v in self.get_lot_form(lot_id):
+            if k == "price":
+                v, seen = (f"{price:.2f}".rstrip("0").rstrip(".")), True
+            fields.append((k, v))
+        if not seen:
+            raise FunPayError("в форме лота нет поля цены")
+        if not any(k == "offer_id" for k, _ in fields):
+            fields.append(("offer_id", str(lot_id)))
+        self._save_form(fields)
+        return True
+
+    def new_lot_form(self, node) -> list:
+        """Пустая форма нового лота в разделе (для копирования)."""
+        r = self._req("GET", f"/lots/offerEdit?node={node}")
+        soup = BeautifulSoup(r.text, "html.parser")
+        form = soup.find("form", class_=re.compile("form-offer-editor")) or \
+            next((f for f in soup.find_all("form") if "offerSave" in (f.get("action") or "")), None)
+        if not form:
+            raise FunPayError(f"не удалось открыть форму нового лота в разделе {node}")
+        names = []
+        for el in form.find_all(["input", "textarea", "select"]):
+            if el.get("name") and not el.has_attr("disabled"):
+                names.append((el.get("name"), el.get("value", "") if el.name == "input" else ""))
+        return names
+
+    def create_lot_from(self, src_fields: list, node) -> dict:
+        """Создаёт лот на этом аккаунте по полям лота с другого аккаунта."""
+        blank = self.new_lot_form(node)
+        allowed = {k for k, _ in blank}
+        skip = {"csrf_token", "offer_id", "node_id", "location", "deleted"}
+        fields = [(k, v) for k, v in blank if k in ("node_id", "location")]
+        fields += [(k, v) for k, v in src_fields if k in allowed and k not in skip]
+        fields += [("offer_id", "0"), ("node_id", str(node))] if not any(k == "node_id" for k, _ in fields) else [("offer_id", "0")]
+        return self._save_form(fields)
+
     # ═════════ баланс и вывод ═════════
     def get_available_balance(self, currency="rub") -> Optional[float]:
         """Доступный к выводу баланс со страницы /account/balance (если не удалось — None)."""

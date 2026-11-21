@@ -417,7 +417,23 @@ class TelegramUI:
 
         url = self.app.public_url
         app_btn = ("📱 Приложение", ("webapp", url)) if url.startswith("https://") else ("📱 Приложение", "duo:webapp")
-        rows = [[app_btn], [("🔵 FunPay", "duo:fp"), ("🟢 Playerok", "duo:pl")]]
+        vac = st["vacation"]
+        rows = [[app_btn],
+                [("🔵 FunPay", "duo:fp"), ("🟢 Playerok", "duo:pl")],
+                [("━━━  📋 Общее  ━━━", "duo:noop")],
+                [("📊 Сводка", "duo:status", "orders"), ("💰 Финансы", "duo:fin", "finance")],
+                [("📦 Товары", "duo:dlv", "products"), ("👥 Покупатели", "duo:cust", "customers")],
+                [(f"🏖 Отпуск: {'вкл' if vac else 'выкл'}", "duo:t:features.vacation.enabled:main", "settings"),
+                 ("⬆️ Поднять лоты", "duo:raise", "settings")],
+                [("━━━  ⚙️ Настройки  ━━━", "duo:noop", "settings")],
+                [("✨ Функции", "duo:feat", "settings"), ("🔔 Уведомления", "duo:ntf", "settings")],
+                [("🕘 Работа", "duo:gen", "settings"), ("✍️ Подпись", "duo:wm", "settings")],
+                [("🤖 Бот и прокси", "duo:prx", "system"), ("📡 Доступ к приложению", "duo:webapp", "system")],
+                [("👨‍💼 Команда", "duo:team", "users"), ("🧩 Плагины", "duo:plg:0", "plugins")],
+                [("━━━  🛠 Система  ━━━", "duo:noop", "system")],
+                [("💾 Бекап", "duo:backup", "secrets"), ("📜 Логи", "duo:logs", "system"),
+                 ("🔄 Перезапуск", "duo:restart", "system")],
+                [("❓ Помощь", "duo:help"), ("ℹ️ О боте", "duo:about"), ("🔄 Обновить", "duo:main")]]
         return text, rows
 
     def settings_menu(self, uid):
@@ -436,7 +452,7 @@ class TelegramUI:
                 [("🧩 Плагины", "duo:plg:0", "plugins"), ("👨‍💼 Команда", "duo:team", "users")],
                 [("💾 Бекап", "duo:backup", "secrets"), ("📜 Логи", "duo:logs", "system"),
                  ("🔄 Перезапуск", "duo:restart", "system")],
-                [("ℹ️ О боте", "duo:about"), ("🏠 Главное меню", "duo:main")]]
+                [("ℹ️ О боте", "duo:about"), ("🏠 Меню", "duo:main")]]
         if not any(len(r) > 2 and r[2] in perms for row in rows for r in row):
             text = "<b>⚙️ Настройки</b>\n\nУ вашей роли нет доступа к настройкам."
         return text, rows
@@ -464,15 +480,14 @@ class TelegramUI:
 
     def help_menu(self):
         text = (f"<b>❓ Как пользоваться</b>\n\n"
-                "В /menu три кнопки:\n"
-                "📱 <b>Приложение</b> — панель со всеми настройками (кнопка «Панель» слева от поля ввода)\n"
-                "🔵 <b>FunPay</b> и 🟢 <b>Playerok</b> — всё по площадке:\n"
-                "   👤 аккаунты и прокси · 📊 статистика\n"
-                "   💬 приветствие, автоответ, отпуск\n"
-                "   🛒 автовыдача, текст при заказе, напоминания\n"
-                "   ⬆️ поднятие лотов · 💸 вывод денег\n"
-                "   🏷 лоты без товара · 🔔 уведомления\n\n"
-                "Бот, прокси, плагины, команда помощников — «⚙️ Общие настройки» внутри площадки или /settings.\n\n"
+                "<b>/menu</b> — главное меню:\n"
+                "📱 <b>Приложение</b> — панель со всеми настройками\n"
+                "🔵 <b>FunPay</b> и 🟢 <b>Playerok</b> — всё по площадке: профиль, статистика, чаты, заказы, "
+                "приветствие, команды, автовыдача, поднятие, отзывы, автовывод\n"
+                "📋 <b>Общее</b> — сводка, финансы, товары, покупатели, отпуск, поднять лоты\n"
+                "⚙️ <b>Настройки</b> — функции, уведомления, рабочие часы, подпись, бот и прокси, доступ к приложению, "
+                "команда, плагины\n"
+                "🛠 <b>Система</b> — бекап, логи, перезапуск\n\n"
                 "Если панель не открывается — /app.\n\n"
                 "<b>Команды</b>\n"
                 "/menu — главное меню\n/status — сводка\n/app — открыть панель\n"
@@ -518,7 +533,7 @@ class TelegramUI:
                   for m, n in MODES.items() if m in ("auto", "cloudflared", "localhostrun", "pinggy")],
                  [(("• " if mode == "none" else "") + "Выключить", "duo:tmode:none", "system"),
                   ("🔗 Свой адрес", "duo:e:web.public_url", "system")],
-                 [("🔐 Пароль панели", "duo:e:web.password", "secrets"), ("⬅️ Назад", "duo:set")]]
+                 [("🔐 Пароль панели", "duo:e:web.password", "secrets"), ("⬅️ Меню", "duo:main")]]
         return text, rows
 
     def about_menu(self):
@@ -531,7 +546,7 @@ class TelegramUI:
                 [("🛠 GitHub", "duo:e:project.links.github", "settings"),
                  (f"{onoff(self.cfg.get('project.set_bot_description', True))} Описание бота",
                   "duo:t:project.set_bot_description:about", "settings")],
-                [("◀️ Назад", "duo:set")]]
+                [("⬅️ Меню", "duo:main")]]
         return text, rows
 
     def watermark_menu(self):
@@ -546,7 +561,7 @@ class TelegramUI:
                  (f"{onoff(g.get('watermark_newline', True))} Отдельной строкой", "duo:t:general.watermark_newline:wm")],
                 [(f"{onoff(g.get('watermark_manual', True))} И в ответах из Telegram/мини-аппа", "duo:t:general.watermark_manual:wm")]]
         rows += [[(p, f"duo:wmp:{i}")] for i, p in enumerate(WATERMARK_PRESETS)]
-        rows += [[("✏️ Своя подпись", "duo:e:general.watermark")], [("◀️ Назад", "duo:gen")]]
+        rows += [[("✏️ Своя подпись", "duo:e:general.watermark")], [("⬅️ Меню", "duo:main")]]
         return text, rows
 
     # ---------- площадки и аккаунты ----------
@@ -622,7 +637,7 @@ class TelegramUI:
                  [sec("accs", "settings"), sec("ntf", "settings")],
                  [(f"{'🟢 ' + title[2:] + ' включён' if on else '🔴 ' + title[2:] + ' выключен'}",
                    f"duo:t:{platform}.enabled:{p}", "settings")],
-                 [("🏠 Меню", "duo:main"), ("🔄 Обновить", f"duo:{p}"), ("⚙️ Общее", "duo:set")]]
+                 [("🏠 Меню", "duo:main"), ("🔄 Обновить", f"duo:{p}")]]
         return text, rows
 
     def platform_section(self, p, sec, uid=None):
@@ -955,7 +970,7 @@ class TelegramUI:
             for u in users) + "\n\n" + "\n".join(f"<b>{ROLE_NAMES[r]}</b>: {ROLE_HINTS[r]}" for r in ROLES)
         rows = [[(f"{ROLE_NAMES.get(u.get('role'), '')[:1]} {u.get('name') or u['id']}", f"duo:usr:{u['id']}")] for u in users]
         rows += [[("➕ Пригласить менеджера", "duo:inv:manager"), ("➕ Админа", "duo:inv:admin")],
-                 [("➕ Совладельца", "duo:inv:owner")], [("◀️ Назад", "duo:set")]]
+                 [("➕ Совладельца", "duo:inv:owner")], [("⬅️ Меню", "duo:main")]]
         return text, rows
 
     def user_card(self, uid):
@@ -980,7 +995,7 @@ class TelegramUI:
                 [("🚫 ЧС +", "duo:e:blacklist.add"), ("✅ ЧС −", "duo:e:blacklist.remove")],
                 [("🔐 Пароль панели", "duo:e:web.password", "secrets"), ("🔗 URL мини-аппа", "duo:e:web.public_url", "system")],
                 [("📣 Чаты для уведомлений", "duo:e:extra_chats", "system")],
-                [("◀️ Назад", "duo:set")]]
+                [("⬅️ Меню", "duo:main")]]
         return text, rows
 
     def stats_text(self):
@@ -1025,7 +1040,7 @@ class TelegramUI:
                  ("🌙 Время отчёта", "duo:e:features.daily_report.time")],
                 [("📉 Порог остатков", "duo:e:features.low_stock.threshold"), ("🔗 Вебхуки", "duo:e:webhooks")],
                 [("🏖 Отпуск: до даты", "duo:e:features.vacation.until"), ("✏️ Текст отпуска", "duo:e:features.vacation.text")],
-                [("◀️ Назад", "duo:set")]]
+                [("⬅️ Меню", "duo:main")]]
         return text, rows
 
     def customers_menu(self):
@@ -1072,7 +1087,7 @@ class TelegramUI:
                 row = []
         if row:
             rows.append(row)
-        rows.append([("◀️ Назад", "duo:set")])
+        rows.append([("⬅️ Меню", "duo:main")])
         return "<b>🔔 Уведомления</b>", rows
 
     def plugins_menu(self, offset=0):
@@ -1090,7 +1105,7 @@ class TelegramUI:
             nav.append(("➡️", f"duo:plg:{offset + 8}"))
         if nav:
             rows.append(nav)
-        rows.append([("◀️ Назад", "duo:set")])
+        rows.append([("⬅️ Меню", "duo:main")])
         return text, rows
 
     def plugin_card(self, uid):
@@ -1168,7 +1183,7 @@ class TelegramUI:
                      (f"{onoff(pc.get('failover', True))} Автопереключение", "duo:t:telegram.proxy.failover:prx")])
         rows.append([("➕ Добавить прокси", "duo:xadd"), ("🧪 Проверить все", "duo:xall")])
         rows.append([("🔁 Применить сейчас", "duo:xapply"), ("🤖 Сменить бота", "duo:e:telegram.token", "secrets")])
-        rows.append([("◀️ Назад", "duo:set")])
+        rows.append([("⬅️ Меню", "duo:main")])
         text += ("\nПрокси можно присылать в любом виде — бот сам приведёт запись к нужному формату. "
                  "🏷 — тип: IPv4, IPv4 Shared или IPv6.\n<i>Изменения применяются сразу, без перезапуска.</i>")
         return text, rows

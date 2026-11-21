@@ -158,42 +158,95 @@ function confirmBox(text) {
 /* ───────── шапка: две площадки ───────── */
 async function refreshDuo() {
   try { STATUS = await api("status"); } catch (e) { return; }
-  const t = STATUS.stats.today, fin = can("finance");
-  const half = (p, s) => {
-    const dot = !s.enabled ? "" : s.ok ? "ok" : "bad";
-    const big = fin ? money(t[p].sum) : t[p].count;
-    const sub = fin ? `прибыль ${money(t[p].profit)} · ${t[p].count} ${plural(t[p].count, "заказ", "заказа", "заказов")}`
-                    : `${plural(t[p].count, "заказ", "заказа", "заказов")} сегодня`;
-    return `<button class="half ${p === "funpay" ? "fp" : "pl"} ${s.enabled ? "" : "off"}" onclick="${can("settings") ? `stack.length=0;TAB='more';go('more');push(accountsView,'${p}')` : ""}">
-      <div class="name"><span class="dot ${dot}"></span>${PN[p]} <small>${H(s.username || (s.accounts ? "подключаюсь…" : "нет аккаунтов"))}</small></div>
-      <div class="sum num">${big}</div><div class="sub num">${sub}</div></button>`;
-  };
-  $("#duo").innerHTML = half("funpay", STATUS.funpay) + half("playerok", STATUS.playerok);
 }
 function plural(n, a, b, c) { n = Math.abs(n) % 100; const n1 = n % 10; return n > 10 && n < 20 ? c : n1 > 1 && n1 < 5 ? b : n1 === 1 ? a : c; }
 
-/* ───────── главная: только главное ───────── */
+/* ───────── дашборд ───────── */
+let DAY_PICK = null;
+function greet() { const h = new Date().getHours(); return h < 5 ? "Доброй ночи" : h < 12 ? "Доброе утро" : h < 18 ? "Добрый день" : "Добрый вечер"; }
+function pct(a, b) { if (!b) return a ? "+100%" : "0%"; const v = (a - b) / b * 100; return (v >= 0 ? "+" : "") + v.toFixed(1).replace(".", ",") + "%"; }
+function health(s) {
+  // «Центр здоровья»: что проверяем и всё ли в порядке
+  const checks = [];
+  const accs = s.accounts.filter(a => a.running);
+  checks.push({ok: accs.length > 0 && accs.every(a => a.ok), name: "Аккаунты на связи",
+    sub: accs.length ? `${accs.filter(a => a.ok).length} из ${accs.length}` : "нет аккаунтов", fix: "accountsView,'funpay'"});
+  checks.push({ok: s.telegram.ok, name: "Telegram-бот", sub: s.telegram.ok ? "@" + (s.telegram.username || "") + (s.telegram.proxy && s.telegram.proxy !== "напрямую" ? " · прокси " + s.telegram.proxy : "") : (s.telegram.error || "нет связи"), fix: "botView"});
+  if (s.web_enabled) checks.push({ok: ["ok", "off"].includes((s.tunnel || {}).state) || !!s.web.url, name: "Доступ к панели из Telegram",
+    sub: ({ok: "работает", starting: "подключается…", unreachable: "адрес не открывается", failed: "не подключилось", off: s.web.url ? "свой адрес" : "выключен"})[(s.tunnel || {}).state] || "", fix: "accessView"});
+  const low = Object.entries(s.products || {}).filter(([, n]) => n <= 3);
+  checks.push({ok: !low.length, name: "Товар для автовыдачи", sub: low.length ? "заканчивается: " + low.map(([k, n]) => `${k} (${n})`).slice(0, 3).join(", ") : Object.keys(s.products || {}).length ? "хватает" : "файлов нет", fix: "goods"});
+  const paused = Object.entries(s.withdraw || {}).filter(([, w]) => w.paused);
+  checks.push({ok: !paused.length, name: "Автовывод", sub: paused.length ? "на паузе: " + paused.map(([p]) => PN[p]).join(", ") : "в порядке", fix: "withdrawView"});
+  if (s.supplier_pending) checks.push({ok: false, name: "Поставщики", sub: `${s.supplier_pending} заказ(а) ждут проверки`, fix: "suppliersView"});
+  const score = Math.round(checks.filter(c => c.ok).length / checks.length * 100);
+  return {checks, score};
+}
 async function home() {
-  view(`<div class="empty">Загружаю…</div>`);
+  if (!STATUS) view(`<div class="empty">Загружаю…</div>`);
   await refreshDuo();
-  const s = STATUS, fin = can("finance"), set = can("settings");
+  const s = STATUS, st = s.stats, fin = can("finance"), set = can("settings");
+  const days = st.daily.slice(-7), today = days.at(-1) || {funpay: 0, playerok: 0, count: 0}, yest = days.at(-2) || {funpay: 0, playerok: 0};
+  const rev = d => (d.funpay || 0) + (d.playerok || 0);
+  const bal = s.accounts.filter(a => typeof a.balance === "number").reduce((x, a) => x + a.balance, 0);
+  const ready = s.accounts.filter(a => a.running && a.ok).length, total = s.accounts.length;
+  const H_ = health(s);
+  const name = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.first_name) || "";
+  const bad = H_.checks.filter(c => !c.ok);
+  const goSet = fn => `TAB='more';go('more');push(${fn})`;
   const ev = can("chat") ? await api("events") : {events: []};
-  const warn = [];
-  const goSet = (fn, arg = "") => `TAB='more';go('more');push(${fn}${arg ? ",'" + arg + "'" : ""})`;
-  if (set && !s.accounts.length) warn.push(link("⚠️", "Добавьте аккаунт", "golden_key FunPay или token Playerok", goSet("accountsView", "funpay")));
-  s.accounts.filter(a => a.running && !a.ok && a.error).forEach(a => warn.push(link("⚠️", H(a.name) + ": нет связи", H(a.error), set ? goSet("accountView", a.id) : "")));
-  if (s.supplier_pending && can("delivery")) warn.push(link("🏭", "Заказы ждут проверки у поставщика", "проверьте вручную", goSet("suppliersView")));
-  Object.entries(s.withdraw || {}).forEach(([p, w]) => { if (w.paused && can("withdraw")) warn.push(link("⏸", `Автовывод ${PN[p]} на паузе`, H(w.paused), goSet("withdrawView"))); });
-  const quick = set ? `<h3>Быстро</h3><div class="group">
-      ${tog("features.vacation.enabled", "🏖 Режим отпуска", "бот сам ответит, что вы не на связи", "act('vacation').then(home)")}
-      ${link("⬆️", "Поднять лоты FunPay", "", "act('raise')")}
-      ${link("⚙️", "Все переключатели", "автовыдача, автоответ, приветствие…", goSet("switchesView"))}</div>` : "";
+
+  const kpi = (label, big, sub, cls = "", onclick = "") =>
+    `<button class="kpi ${cls}" ${onclick ? `onclick="${onclick}"` : "disabled"}><span class="k-l">${label}</span><b class="k-v num">${big}</b>${sub ? `<span class="k-s">${sub}</span>` : ""}</button>`;
+  const ch = rev(today) - rev(yest);
   view(`
-    ${warn.length ? `<h3>Нужно внимание</h3><div class="group">${warn.join("")}</div>` : ""}
-    ${quick}
-    ${can("chat") ? `<h3>Последнее</h3>
-    <div class="group">${ev.events.slice(0, 8).map(evRow).join("") || `<div class="empty"><b>Пока тихо</b>Здесь появятся сообщения и заказы.</div>`}</div>` : ""}
-    ${fin ? `<div class="actions" style="margin-top:12px"><button class="btn ghost" onclick="${goSet("financeView")}">📊 Статистика и прибыль</button></div>` : ""}`);
+    <section class="hello">
+      <h1>${greet()}${name ? ", " + H(name) : ""}</h1>
+      <p>${bad.length ? `<span class="dot bad"></span>Нужно внимание: ${bad.length}` : `<span class="dot ok"></span>Всё работает`} · ${new Date().toLocaleString("ru-RU", {day: "numeric", month: "long", hour: "2-digit", minute: "2-digit"})}</p>
+    </section>
+    <div class="kpis">
+      ${fin ? kpi("Выручка сегодня", money(rev(today)) + " ₽", `${today.count || 0} ${plural(today.count || 0, "продажа", "продажи", "продаж")} · <span class="${ch >= 0 ? "up" : "down"}">${pct(rev(today), rev(yest))}</span> ко вчера`, "accent", goSet("financeView"))
+            : kpi("Продаж сегодня", today.count || 0, "")}
+      ${fin ? kpi("Баланс", money(bal) + " ₽", s.accounts.length ? "на всех аккаунтах" : "нет аккаунтов", "", can("withdraw") ? goSet("withdrawView") : "") : ""}
+      ${kpi("Аккаунты", `${ready} из ${total}`, total ? (ready === total ? "готовы к работе" : "есть проблемы") : "добавьте аккаунт", ready === total && total ? "" : "warn", set ? goSet("accountsView,'funpay'") : "")}
+      ${kpi("Здоровье", H_.score + "%", bad.length ? bad[0].name.toLowerCase() : "всё в порядке", H_.score < 100 ? "warn" : "", "push(healthView)")}
+    </div>
+    ${fin ? weekChart(days) : ""}
+    <h3>Аккаунты</h3>
+    <div class="group">${s.accounts.map(a => `<button class="item" onclick="${set ? goSet(`accountView,'${a.id}'`) : ""}">
+        <span class="ic plat ${a.platform}">${a.platform === "funpay" ? "FP" : "PL"}</span>
+        <span class="tx"><b>${H(a.name)}</b><span>${!a.running ? "выключен" : a.ok ? "готов к работе" : H(a.error || "нет связи")}</span></span>
+        ${fin && typeof a.balance === "number" ? `<span class="val num">${money(a.balance)} ₽</span>` : ""}
+        <span class="dot ${!a.running ? "" : a.ok ? "ok" : "bad"}"></span></button>`).join("")
+      || `<div class="empty"><b>Аккаунтов нет</b>${set ? `<button class="btn sm" style="margin-top:10px" onclick="${goSet("accountsView,'funpay'")}">Добавить аккаунт</button>` : ""}</div>`}</div>
+    ${set ? `<div class="actions"><button class="btn ghost" onclick="act('raise')">⬆️ Поднять лоты</button>
+      <button class="btn ghost" onclick="act('vacation').then(home)">🏖 Отпуск: ${s.vacation ? "вкл" : "выкл"}</button></div>` : ""}
+    ${can("chat") ? `<h3>Последние события</h3>
+    <div class="group">${ev.events.slice(0, 6).map(evRow).join("") || `<div class="empty"><b>Пока тихо</b>Здесь появятся сообщения и заказы.</div>`}</div>` : ""}`);
+}
+function weekChart(days) {
+  const rev = d => (d.funpay || 0) + (d.playerok || 0);
+  const vals = days.map(rev), max = Math.max(1, ...vals), avg = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
+  const pick = DAY_PICK == null ? days.length - 1 : DAY_PICK, d = days[pick] || {}, total = vals.reduce((a, b) => a + b, 0);
+  const bars = days.map((x, i) => `<button class="bar ${i === pick ? "on" : ""}" onclick="DAY_PICK=${i};home()" aria-label="${x.date}: ${money(rev(x))} ₽">
+      <i style="height:calc((100% - 22px) * ${Math.max(.02, rev(x) / max).toFixed(3)})"></i><span>${i === days.length - 1 ? "сегодня" : x.date}</span></button>`).join("");
+  const prev = days[pick - 1];
+  return `<div class="wchart">
+    <div class="wc-h"><b>Выручка за 7 дней</b><span class="num">${money(total)} ₽</span></div>
+    <div class="wc-plot">${bars}<div class="avg" style="bottom:calc(22px + (100% - 22px) * ${(avg / max).toFixed(3)})"><span>среднее ${money(Math.round(avg))} ₽</span></div></div>
+    <div class="wc-d">
+      <div><span>${pick === days.length - 1 ? "Сегодня" : d.date}</span><b class="num">${money(rev(d))} ₽</b></div>
+      <div><span>Продаж</span><b class="num">${d.count || 0}</b></div>
+      <div><span>Средний чек</span><b class="num">${d.count ? money(Math.round(rev(d) / d.count)) : 0} ₽</b></div>
+      <div><span>${prev ? "К прошлому дню" : "Доля недели"}</span><b class="num">${prev ? pct(rev(d), rev(prev)) : (total ? Math.round(rev(d) / total * 100) : 0) + "%"}</b></div>
+    </div></div>`;
+}
+function healthView() {
+  const H_ = health(STATUS);
+  view(`${title("Центр здоровья")}
+    <div class="health-score"><b class="num">${H_.score}%</b><span>${H_.score === 100 ? "Всё работает как надо" : "Есть что поправить — нажмите на пункт"}</span></div>
+    <div class="group">${H_.checks.map(c => `<button class="item" onclick="${c.ok ? "" : (c.fix === "goods" ? "push(goods)" : `push(${c.fix})`)}">
+      <span class="ic">${c.ok ? "✅" : "⚠️"}</span><span class="tx"><b>${H(c.name)}</b><span>${H(c.sub)}</span></span>${c.ok ? "" : `<span class="chev">›</span>`}</button>`).join("")}</div>`);
 }
 function evRow(e) {
   const p = `<span class="pf ${e.platform}">${e.platform === "funpay" ? "FP" : "PL"}</span>`;

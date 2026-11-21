@@ -503,6 +503,8 @@ class App:
             "withdraw": {p: {"mode": self.cfg.get(f"withdraw.{p}.mode"), "paused": self.withdraw.paused(p)}
                          for p in ("funpay", "playerok")},
             "supplier_pending": len(self.suppliers.pending()),
+            "tunnel": dict(self.web.tunnel) if self.web else {"state": "off"},
+            "web_enabled": bool(self.cfg.get("web.enabled")),
         }
 
 

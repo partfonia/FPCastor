@@ -502,8 +502,19 @@ async function openModule(key) {
   push(moduleView, key);
 }
 let MODS = [];
+let PAYWALL = {};
+function paywallCard(single) {
+  const p = PAYWALL || {};
+  if (!p.enabled || p.ok) return "";
+  return `<div class="paywall"><div class="pw-h"><span class="pw-i">💎</span><div><b>${H(p.name)}</b><span>${H(p.price)} · все встроенные плагины</span></div></div>
+    <p>${single ? "Этот плагин работает по подписке. Настройки можно заполнить заранее — он заработает сразу после оплаты." : "Одна подписка открывает все плагины из списка ниже."}
+    <br><small>Сейчас: ${H(p.status || "ключ не введён")}</small></p>
+    <div class="row">${p.shop ? `<a class="btn" href="${H(p.shop)}" target="_blank" onclick="return openShop('${H(p.shop)}')">Купить подписку</a>` : ""}
+      ${can("secrets") ? `<button class="btn ghost" onclick="push(licensesView)">Ввести ключ</button>` : ""}</div></div>`;
+}
+function openShop(u) { try { if (tg && tg.openTelegramLink && u.startsWith("https://t.me/")) { tg.openTelegramLink(u); return false; } } catch (e) {} return true; }
 async function modulesView() {
-  const j = await api("modules"); MODS = j.modules || [];
+  const j = await api("modules"); MODS = j.modules || []; PAYWALL = j.paywall || {};
   const groups = ["Аренда", "Выдача", "Перепродажа", "Общение", "Лоты и цены", "Заказы", "Деньги", "Безопасность", "Прочее"];
   [...new Set(MODS.map(m => m.group))].forEach(g => { if (!groups.includes(g)) groups.push(g); });
   let MINE = [];
@@ -511,8 +522,9 @@ async function modulesView() {
   const mineKeys = new Set(MINE.map(p => p.module).filter(Boolean));
   const on = MODS.filter(m => getPath("modules." + m.key + ".enabled")).length;
   view(`${title("Плагины")}<p class="hint" style="margin:0 6px 10px">Включено ${on} из ${MODS.length}. Нажмите на плагин — там описание, настройки и включение.</p>
+    ${paywallCard(false)}
     ${groups.map(g => { const list = MODS.filter(m => m.group === g && !mineKeys.has(m.key)); return list.length ? `<h3>${H(g)}</h3><div class="group">${list.map(m => `<button class="item clamp" onclick="push(moduleView,'${m.key}')"><span class="ic">${m.icon}</span>
-      <span class="tx"><b>${H(m.name)}</b><span>${getPath("modules." + m.key + ".enabled") ? "🟢 " + H(m.status || "включён") : H(m.description)}</span></span><span class="chev">›</span></button>`).join("")}</div>` : ""; }).join("")}
+      <span class="tx"><b>${H(m.name)}${m.locked ? ' <span class="lock">🔒</span>' : ""}</b><span>${getPath("modules." + m.key + ".enabled") && !m.locked ? "🟢 " + H(m.status || "включён") : H(m.description)}</span></span><span class="chev">›</span></button>`).join("")}</div>` : ""; }).join("")}
     ${can("plugins") ? `<h3>Установленные вами</h3><div class="group">${MINE.map(p => { const m = p.module && MODS.find(x => x.key === p.module);
       return m ? `<button class="item clamp" onclick="push(moduleView,'${m.key}')"><span class="ic">${m.icon}</span><span class="tx"><b>${H(m.name)}</b><span>${getPath("modules." + m.key + ".enabled") ? "🟢 " + H(m.status || "включён") : H(m.description)}</span></span><span class="chev">›</span></button>`
         : `<button class="item clamp" onclick="push(pluginsView)"><span class="ic">📥</span><span class="tx"><b>${H(p.name)}</b><span>${p.enabled ? "🟢 включён" : "выключен"} · ${H(p.description || p.file)}</span></span><span class="chev">›</span></button>`; }).join("")}
@@ -531,6 +543,7 @@ function moduleView(key) {
   const base = "modules." + key;
   const items = m.fields.filter(f => f[2] === "items"), simple = m.fields.filter(f => f[2] !== "items");
   view(`${title(m.icon + " " + m.name)}<p class="hint" style="margin:0 6px 10px">${H(m.description)}</p>
+    ${m.locked ? paywallCard(true) : ""}
     <div class="group">${tog(base + ".enabled", "Плагин включён", H(m.status || ""))}</div>
     ${items.map(f => { const list = getPath(base + "." + f[0]) || [], sub = m.item_fields[f[0]] || [];
       return `<h3>${H(f[1])} · ${list.length}</h3>${list.map((it, i) => `<div class="group" style="margin-bottom:8px">

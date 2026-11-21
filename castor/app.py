@@ -56,6 +56,9 @@ class App:
         self.webhooks = Webhooks(self)
         self.lowstock = LowStock(self)
         self.scheduler = Scheduler(self)
+        from . import licensing, paywall
+        licensing.bind(self)
+        paywall.init()          # подписка на встроенные плагины (если владелец её настроил)
         from .modules import ModuleManager
         self.modules = ModuleManager(self)
         self.stock = StockManager(self)
@@ -77,8 +80,6 @@ class App:
         for p in (str(BASE_DIR), str(PLUGINS_DIR)):
             if p not in sys.path:
                 sys.path.insert(0, p)
-        from . import licensing
-        licensing.bind(self)
         self.plugins.load_all()
         self.sync_accounts(start=False)
         if self.cfg.get("telegram.enabled") and self.cfg.get("telegram.token") and HAS_TELEBOT:

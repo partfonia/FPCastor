@@ -294,3 +294,16 @@ button.item:active{background:color-mix(in srgb,var(--accent) 8%,transparent)}
   main > :nth-child(2){animation-delay:.03s} main > :nth-child(3){animation-delay:.06s} main > :nth-child(n+4){animation-delay:.09s}
   @keyframes enter{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 }
+
+/* подписка на плагины */
+.paywall{position:relative;overflow:hidden;border-radius:var(--r-lg);padding:16px;margin:0 0 14px;color:#fff;
+  background:linear-gradient(135deg,var(--accent) 0%,var(--accent2) 60%,#d46fd8 100%);box-shadow:0 16px 34px -18px var(--accent)}
+.paywall::after{content:"";position:absolute;right:-40px;top:-40px;width:160px;height:160px;border-radius:50%;
+  background:radial-gradient(circle,rgba(255,255,255,.28),transparent 70%)}
+.paywall .pw-h{display:flex;gap:12px;align-items:center}
+.paywall .pw-i{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-size:20px;background:rgba(255,255,255,.18)}
+.paywall b{display:block;font-size:16px} .paywall .pw-h span{font-size:13px;opacity:.88}
+.paywall p{margin:10px 0 12px;font-size:13.5px;line-height:1.45;opacity:.95} .paywall small{opacity:.8}
+.paywall .btn{background:#fff;color:#3b2fb8;box-shadow:none;text-decoration:none;display:inline-flex}
+.paywall .btn.ghost{background:rgba(255,255,255,.16);color:#fff;border-color:rgba(255,255,255,.3)}
+.item .tx b .lock{display:inline;font-size:12px;margin-left:4px;color:inherit}

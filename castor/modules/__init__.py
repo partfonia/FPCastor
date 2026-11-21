@@ -114,7 +114,15 @@ class ModuleManager:
                 self.modules[cls.KEY] = cls(app)
             except Exception as e:  # модуль не должен ронять бота
                 log.error("Модуль %s не загрузился: %s", cls.KEY, e)
+        self.builtin = set(self.modules)      # встроенные — работают по подписке (если она настроена)
         self._ensure_defaults()
+
+    def locked(self, key) -> bool:
+        """Встроенный плагин заблокирован: подписка настроена, но не оплачена."""
+        if key not in self.builtin:
+            return False
+        from .. import paywall
+        return not paywall.unlocked()
 
     def _ensure_defaults(self):
         mods = self.app.cfg.data.setdefault("modules", {})
@@ -147,7 +155,10 @@ class ModuleManager:
             return False
 
     def active(self):
-        return sorted((m for m in self.modules.values() if m.enabled), key=lambda m: m.ORDER)
+        from .. import paywall
+        free = paywall.unlocked()
+        return sorted((m for k, m in self.modules.items() if m.enabled and (free or k not in self.builtin)),
+                      key=lambda m: m.ORDER)
 
     def _safe(self, m, fn, *a):
         try:
@@ -190,6 +201,7 @@ class ModuleManager:
             out.append({"key": key, "name": m.NAME, "icon": m.ICON, "description": m.DESCRIPTION,
                         "enabled": m.enabled, "status": self._safe(m, "status") or "", "group": m.GROUP,
                         "platforms": list(m.PLATFORMS), "fields": m.FIELDS, "item_fields": m.ITEM_FIELDS,
+                        "locked": self.locked(key), "builtin": key in self.builtin,
                         "actions": self._safe(m, "actions") or []})
         return out
 

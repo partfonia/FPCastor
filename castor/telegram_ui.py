@@ -557,6 +557,9 @@ class TelegramUI:
         text = (f"<b>🧩 Плагины</b>\n\nВключено {on} из {len(mods)}. Нажмите на плагин — там описание, "
                 f"настройки и кнопка включения.\n\n📥 Свой плагин: просто отправьте .py файл в этот чат.")
         rows = []
+        pw_text, pw_rows = self._paywall_block()
+        text += pw_text
+        rows += pw_rows
         groups = list(self.MOD_GROUPS) + sorted({d["group"] for d in mods} - set(self.MOD_GROUPS))
         for g in groups:
             items = [d for d in mods if d["group"] == g]
@@ -564,14 +567,30 @@ class TelegramUI:
                 continue
             rows.append([(f"━━  {g}  ━━", "duo:noop")])
             for k in range(0, len(items), 2):
-                rows.append([(f"{d['icon']} {d['name']}{' ✅' if d['enabled'] else ''}", f"duo:mod:{d['key']}", "settings")
-                             for d in items[k:k + 2]])
+                rows.append([(f"{d['icon']} {d['name']}{' 🔒' if d['locked'] else ' ✅' if d['enabled'] else ''}",
+                              f"duo:mod:{d['key']}", "settings") for d in items[k:k + 2]])
         if mine:
             rows.append([("━━  Установленные вами  ━━", "duo:noop")])
             for k in range(0, len(mine), 2):
                 rows.append([self._mine_btn(i) for i in mine[k:k + 2]])
         rows.append([("📂 Файлы плагинов", "duo:plg:0", "plugins"), ("🔑 Лицензии", "duo:lic", "secrets")])
         rows.append([("◀️ Назад", "duo:main")])
+        return text, rows
+
+    def _paywall_block(self, short=False):
+        """Плашка подписки: (текст, кнопки). Пусто, если подписка не настроена или оплачена."""
+        from . import paywall
+        pi = paywall.info()
+        if not pi.get("enabled"):
+            return "", []
+        if pi.get("ok"):
+            return ("" if short else f"\n\n💎 Подписка «{esc(pi['name'])}»: {esc(pi['status'])}"), []
+        text = (f"\n\n🔒 <b>Плагины работают по подписке — {esc(pi['price'])}</b>\n"
+                f"Одна подписка открывает все встроенные плагины. Сейчас: {esc(pi['status'] or 'ключ не введён')}.")
+        rows = []
+        if pi.get("shop"):
+            rows.append([("🛒 Купить подписку", pi["shop"])])
+        rows.append([("🔑 Ввести ключ", f"duo:e:licenses.{pi['id']}", "secrets"), ("🔄 Проверить", "duo:licchk", "secrets")])
         return text, rows
 
     def _mine_btn(self, i):
@@ -595,6 +614,10 @@ class TelegramUI:
         if st:
             text += f"\n📊 <b>Сейчас:</b> {esc(st)}\n"
         rows = [[(f"{'🔴 Выключить' if m.enabled else '🟢 Включить'} плагин", f"duo:t:modules.{key}.enabled:mod-{key}", "settings")]]
+        if self.app.modules.locked(key):
+            pw_text, pw_rows = self._paywall_block()
+            text += pw_text.replace("Плагины работают", "Плагин работает") + "\nНастройки можно заполнить заранее.\n"
+            rows = pw_rows + rows
         items_note = []
         for f in m.FIELDS:
             path, label, typ = f[0], f[1], f[2]
@@ -1956,6 +1979,10 @@ class TelegramUI:
                     cur = m.cfg.get(path)
                     nxt = vals[(vals.index(cur) + 1) % len(vals)] if cur in vals else vals[0]
                     self.cfg.set(f"modules.{key}.{path}", nxt)
+            elif m and sub in ("act", "free") and self.app.modules.locked(key):
+                bot.answer_callback_query(c.id, "🔒 Плагин работает по подписке «Все плагины Castor». Меню → 🔑 Лицензии",
+                                          show_alert=True)
+                return
             elif m and sub in ("act", "free"):
                 aid = parts[4] if sub == "act" else "free"
                 args = parts[5:] if sub == "act" else parts[4:]

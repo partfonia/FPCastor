@@ -39,8 +39,10 @@ DEFAULT_CFG = {
     "max_machines": 1,                    # на скольких установках бота можно использовать один ключ
     "reset_cooldown_hours": 24,           # как часто покупатель может сам сбросить привязку
     "products": {
-        "example_plugin": {"name": "Пример плагина", "description": "Что умеет плагин",
-                           "stars": 100, "days": 30, "file": ""}
+        # подписка на все встроенные плагины бота (ID должен совпадать с castor/paywall.py → PRODUCT_ID)
+        "castor_plugins": {"name": "Все плагины Castor — 1 месяц",
+                           "description": "Аренда Steam/Dota/Valorant, коды с почты, автоцена, перепродажа и ещё 25+ плагинов",
+                           "stars": 35, "days": 30, "file": ""}
     },
     "welcome": "Магазин плагинов для FunPay & Playerok Castor 🛍\nВыберите плагин — оплата звёздами Telegram, ключ придёт сразу.",
 }

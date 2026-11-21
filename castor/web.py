@@ -171,7 +171,8 @@ class WebServer:
                 lines = [x for x in lines if f"[{lvl}]" in x]
             return {"logs": lines}
         if p == "modules":
-            return {"modules": app.modules.describe()}
+            from . import paywall
+            return {"modules": app.modules.describe(), "paywall": paywall.info()}
         if p == "licenses":
             from . import licensing
             return {"licenses": licensing.describe()}
@@ -341,6 +342,8 @@ class WebServer:
             m = app.modules.get(str(b.get("key", "")))
             if not m:
                 return {"error": "Нет такого модуля"}
+            if app.modules.locked(m.KEY):
+                return {"ok": False, "message": "🔒 Нужна подписка «Все плагины Castor» — меню → 🔑 Лицензии"}
             return {"ok": True, "message": m.run_action(str(b.get("action", "")), [str(x) for x in b.get("args", [])])}
         if p == "proxy/parse":
             good, bad = split_proxies(b.get("text", ""), b.get("kind") or None)

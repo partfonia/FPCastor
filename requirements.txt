@@ -2,6 +2,7 @@ requests>=2.31
 beautifulsoup4>=4.12
 pyTelegramBotAPI>=4.20
 PySocks>=1.7
+cryptography>=41     # проверка подписи лицензий платных плагинов
 # для Playerok (библиотека playerokapi встроена в castor/vendor)
 curl_cffi>=0.7
 wrapper-tls-requests>=1.1

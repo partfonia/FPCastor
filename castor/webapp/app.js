@@ -458,6 +458,7 @@ function more() {
       can("users") && link("👨‍💼", "Команда", "помощники и их права", "push(teamView)"),
       set && link("🧩", "Модули", "аренда, коды с почты, автоцена, расписание лотов…", "push(modulesView)"),
       can("plugins") && link("🔌", "Свои плагины", "Cardinal, Castor, Playerok Universal", "push(pluginsView)"),
+      can("secrets") && link("🔑", "Лицензии", "ключи платных плагинов", "push(licensesView)"),
       can("delivery") && set && link("🏭", "Поставщики (API)", `${(CFG.suppliers || []).length} шт`, "push(suppliersView)")]) +
     g([
       can("secrets") && link("💾", "Бекапы", "", "push(backupsView)"),
@@ -466,6 +467,22 @@ function more() {
       link("ℹ️", "О боте", `${H((ME.app || {}).name || "")} v${H((ME.app || {}).version || "")}`, "push(aboutView)")]) +
     `<p class="hint" style="margin:10px 6px">Вы вошли как <b>${H(ME.role_name)}</b>.</p>`);
 }
+/* ───────── лицензии платных плагинов ───────── */
+async function licensesView() {
+  const j = await api("licenses"), L = j.licenses || [];
+  view(`${title("Лицензии")}<p class="hint" style="margin:0 6px 10px">Ключи платных плагинов. Ключ привязывается к вашему Telegram и этой установке бота.</p>
+    ${L.length ? `<div class="group">${L.map(d => `<div class="item"><span class="ic">${d.ok ? "🟢" : "🔴"}</span><div class="tx"><b>${H(d.name)}</b><span>${H(d.status)}</span></div></div>
+      <div class="field"><div class="row"><input id="lk_${H(d.id)}" placeholder="${d.has_key ? "ключ сохранён — вставьте новый, чтобы заменить" : "CST-XXXX-XXXX-XXXX-XXXX"}" style="flex:1">
+      <button class="btn sm" onclick="setLic('${H(d.id)}')">Сохранить</button></div>
+      ${d.shop ? `<div class="note"><a href="${H(d.shop)}" target="_blank">🛒 Купить или продлить</a></div>` : ""}</div>`).join("")}</div>
+      <div class="actions" style="margin-top:10px"><button class="btn ghost" onclick="api('licenses/check',{}).then(()=>licensesView())">🔄 Проверить ключи</button></div>`
+    : `<div class="group"><div class="empty"><b>Платных плагинов нет</b>Купленный плагин отправьте боту файлом или положите в папку plugins — он появится здесь.</div></div>`}`);
+}
+async function setLic(id) {
+  const v = $("#lk_" + id).value.trim(); if (!v) return toast("Вставьте ключ");
+  const j = await api("licenses/set", {id, key: v}); if (j.message) toast(j.message); haptic(j.ok ? "success" : "error"); licensesView();
+}
+
 /* ───────── встроенные модули ───────── */
 let MODS = [];
 async function modulesView() {

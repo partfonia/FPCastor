@@ -124,7 +124,7 @@ class WebServer:
                 "plugins": "plugins", "products": "products", "orders": "orders", "customers": "customers",
                 "chats": "chat", "chat": "chat", "proxy": "system", "backups": "secrets", "lots": "delivery",
                 "suppliers/pending": "delivery", "withdraw": "withdraw", "finance": "finance", "team": "users",
-                "modules": "settings"}
+                "modules": "settings", "licenses": "secrets"}
     POST_PERM = {"config": "settings", "send": "chat", "products": "products", "products/delete": "delivery",
                  "plugins/toggle": "plugins", "plugins/delete": "plugins", "plugins/reload": "plugins",
                  "plugins/upload": "plugins", "plugins/url": "plugins", "customers/note": "customers",
@@ -134,7 +134,8 @@ class WebServer:
                  "supplier/test": "delivery", "supplier/resolve": "delivery", "withdraw/run": "withdraw",
                  "withdraw/unpause": "withdraw", "withdraw/plan": "withdraw", "order/cost": "finance",
                  "order/refund": "refund", "team/invite": "users", "team/role": "users", "team/remove": "users",
-                 "accounts/sync": "settings", "modules/action": "settings"}
+                 "accounts/sync": "settings", "modules/action": "settings",
+                 "licenses/set": "secrets", "licenses/check": "secrets"}
     ACTION_PERM = {"raise": "settings", "restart": "system", "backup": "secrets", "vacation": "settings",
                    "test_delivery": "delivery", "report": "finance"}
 
@@ -171,6 +172,9 @@ class WebServer:
             return {"logs": lines}
         if p == "modules":
             return {"modules": app.modules.describe()}
+        if p == "licenses":
+            from . import licensing
+            return {"licenses": licensing.describe()}
         if p == "plugins":
             return {"plugins": [i.to_dict(app.plugins.enabled(u)) for u, i in app.plugins.plugins.items()],
                     "failed": app.plugins.failed}
@@ -324,6 +328,15 @@ class WebServer:
             cfg.save()
             ok, info = app.reload_telegram()
             return {"ok": ok, "message": info}
+        if p in ("licenses/set", "licenses/check"):
+            from . import licensing
+            if p == "licenses/set":
+                licensing.set_key(str(b.get("id", "")), str(b.get("key", "")))
+                ok, why = licensing.check(str(b.get("id", "")), force=True)
+                return {"ok": ok, "message": ("Ключ принят: " if ok else "Ключ не подошёл: ") + why}
+            for d in licensing.describe():
+                licensing.check(d["id"], force=True)
+            return {"ok": True, "licenses": licensing.describe()}
         if p == "modules/action":
             m = app.modules.get(str(b.get("key", "")))
             if not m:

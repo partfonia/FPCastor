@@ -1,5 +1,5 @@
 """FunPay & Playerok Castor — бот-помощник продавца для двух площадок."""
-VERSION = "2.8.2"
+VERSION = "2.9.0"
 APP_NAME = "FunPay & Playerok Castor"
 SHORT_NAME = "Castor"
 SIGN = "♊"

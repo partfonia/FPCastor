@@ -18,6 +18,7 @@ REQUIRED_PACKAGES = {
     "bs4": "beautifulsoup4",
     "telebot": "pyTelegramBotAPI",
     "socks": "PySocks",
+    "cryptography": "cryptography",
 }
 # библиотека playerokapi встроена в castor/vendor — нужны только её зависимости
 PLAYEROK_DEPS = {
@@ -142,7 +143,7 @@ def _install(packages: dict, title: str) -> list:
 
 def ensure_dependencies():
     failed = _install(REQUIRED_PACKAGES, "Устанавливаю нужные пакеты")
-    hard = [p for p in failed if p != "PySocks"]
+    hard = [p for p in failed if p not in ("PySocks", "cryptography")]
     if hard:
         print(f"\n  {_R}Без этих пакетов бот не запустится.{_0} Установите вручную:\n"
               f"    {sys.executable} -m pip install -r requirements.txt\n")

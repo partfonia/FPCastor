@@ -86,6 +86,11 @@ docker compose logs -f   # здесь будет пароль веб-панел�
 
 Свои модули и плагины — см. [docs/PLUGINS.md](docs/PLUGINS.md) и шаблон [docs/plugin_template.py](docs/plugin_template.py).
 
+## Платные плагины
+Можно продавать свои плагины: сервер лицензий с магазином на Telegram Stars (`license_server/`), ключи привязаны к
+Telegram ID покупателя и установке бота, ответы сервера подписаны. Покупатель вводит ключ в «🔑 Лицензии».
+Инструкция — [docs/PAID_PLUGINS.md](docs/PAID_PLUGINS.md), шаблон — [docs/paid_plugin_template.py](docs/paid_plugin_template.py).
+
 ## Приложение (мини-апп) не открывается?
 Бот сам получает бесплатный HTTPS-адрес и **сам выбирает рабочий способ**:
 1. Cloudflare (через TCP — работает, даже когда провайдер режет UDP/QUIC);

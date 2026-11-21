@@ -90,7 +90,7 @@ NOTIFY_NAMES = {
 
 # какое право нужно для callback-действия (duo:<действие>:…)
 CB_PERM = {
-    "main": None, "mods": "settings", "mod": "settings", "m2": None, "gsw": "settings", "sec": None, "accs": "settings", "noop": None, "cancel": None, "about": None, "help": None, "set": None, "shops": "settings", "webapp": None,
+    "main": None, "lic": "secrets", "licchk": "secrets", "mods": "settings", "mod": "settings", "m2": None, "gsw": "settings", "sec": None, "accs": "settings", "noop": None, "cancel": None, "about": None, "help": None, "set": None, "shops": "settings", "webapp": None,
     "tunnel": "system", "tmode": "system", "ps": None, "wdm": "withdraw", "oos": "delivery", "wm": "settings", "wmp": "settings", "status": "orders", "stats": "finance", "fin": "finance",
     "reply": "chat", "tpl": "chat", "tps": "chat", "cust": "customers",
     "refund": "refund", "refund2": "refund", "plsent": "delivery", "manual": "delivery",
@@ -422,6 +422,7 @@ class TelegramUI:
                 [("📱 Доступ к панели", "duo:webapp", "system")],
                 [("👨‍💼 Команда", "duo:team", "users")],
                 [("🧩 Плагины", "duo:plg:0", "plugins")],
+                [("🔑 Лицензии платных плагинов", "duo:lic", "secrets")],
                 [("🗳 Логи", "duo:logs", "system"), ("💾 Бекап", "duo:backup", "secrets"),
                  ("🔄 Перезапуск", "duo:restart", "system")],
                 [("◀️ Назад", "duo:main:1")]]
@@ -605,6 +606,25 @@ class TelegramUI:
         for aid, label in (self.app.modules._safe(m, "actions") or []):
             rows.append([(label, f"duo:mod:{key}:act:{aid}"[:64], "settings")])
         rows.append([("◀️ Модули", "duo:mods")])
+        return text, rows
+
+    def lic_menu(self):
+        from . import licensing
+        items = licensing.describe()
+        text = "<b>🔑 Лицензии</b>\n\n"
+        if not items:
+            text += ("Платных плагинов пока нет. Купленный плагин присылайте боту файлом или кладите в папку plugins, "
+                     "потом вводите ключ здесь.")
+        rows = []
+        for d in items:
+            text += f"{'🟢' if d['ok'] else '🔴'} <b>{esc(d['name'])}</b>\n<i>{esc(d['status'])}</i>\n\n"
+            row = [(f"✏️ Ключ: {d['name'][:24]}", f"duo:e:licenses.{d['id']}", "secrets")]
+            if d.get("shop"):
+                row.append(("🛒 Купить / продлить", d["shop"]))
+            rows.append(row)
+        if items:
+            rows.append([("🔄 Проверить ключи", "duo:licchk", "secrets")])
+        rows.append([("◀️ Назад", "duo:m2")])
         return text, rows
 
     def accs_menu(self, uid):
@@ -1782,6 +1802,18 @@ class TelegramUI:
             c.set("telegram.token", text)
             threading.Thread(target=self.app.reload_telegram, daemon=True).start()
             return
+        elif key.startswith("licenses."):
+            from . import licensing
+            pid = key.split(".", 1)[1]
+            licensing.set_key(pid, text if text != "-" else "")
+            try:
+                self.bot.delete_message(m.chat.id, m.message_id)
+            except Exception:
+                pass
+            ok, why = licensing.check(pid, force=True)
+            self.send(m.chat.id, ("✅ Ключ принят: " if ok else "❌ Ключ не подошёл: ") + esc(why),
+                      [[("🔑 Лицензии", "duo:lic")]], uid)
+            return
         elif key == "templates":
             c.set("templates", [x.strip() for x in text.split("\n") if x.strip()])
         elif key == "webhooks":
@@ -1871,6 +1903,15 @@ class TelegramUI:
             self.edit(c, *self.section(parts[2], uid))
         elif a == "accs":
             self.edit(c, *self.accs_menu(uid))
+        elif a == "lic":
+            self.edit(c, *self.lic_menu())
+        elif a == "licchk":
+            from . import licensing
+            bot.answer_callback_query(c.id, "Проверяю…")
+            for d in licensing.describe():
+                licensing.check(d["id"], force=True)
+            self.edit(c, *self.lic_menu())
+            return
         elif a == "mods":
             self.edit(c, *self.mods_menu())
         elif a == "mod":
@@ -2002,6 +2043,10 @@ class TelegramUI:
                      "general.watermark": "Отправьте свою подпись (до 60 символов), например <code>♊ 𝑪𝒂𝒔𝒕𝒐𝒓</code>",
                      **{f"project.links.{k}": "Отправьте ссылку: <code>@username</code> или <code>https://…</code>. "
                                               "«-» — убрать ссылку." for k in ("updates", "plugins", "chat", "donate", "github")}}
+            if key.startswith("licenses."):
+                self.ask(cid, uid, "duo_edit", "🔑 Отправьте ключ лицензии (CST-XXXX-…). Сообщение с ключом я удалю.",
+                         {"key": key})
+                return
             if key.startswith("acc."):
                 field = key.split(".", 2)[2]
                 hint = {"name": "Название аккаунта (видно только вам)", "proxy": "Прокси для аккаунта, «-» — без прокси",

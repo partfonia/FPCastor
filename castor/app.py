@@ -77,6 +77,8 @@ class App:
         for p in (str(BASE_DIR), str(PLUGINS_DIR)):
             if p not in sys.path:
                 sys.path.insert(0, p)
+        from . import licensing
+        licensing.bind(self)
         self.plugins.load_all()
         self.sync_accounts(start=False)
         if self.cfg.get("telegram.enabled") and self.cfg.get("telegram.token") and HAS_TELEBOT:

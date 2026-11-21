@@ -55,6 +55,22 @@ class _BufferHandler(logging.Handler):
             pass
 
 
+class _SafeRotatingHandler(RotatingFileHandler):
+    """На Windows лог-файл может быть занят (OneDrive, антивирус, открыт в блокноте) — тогда не падаем
+    с PermissionError при смене файла, а просто пишем дальше в текущий."""
+
+    def doRollover(self):
+        try:
+            super().doRollover()
+        except OSError:
+            self.maxBytes *= 2  # не пытаемся на каждой строке
+            if self.stream is None:
+                self.stream = self._open()
+
+    def handleError(self, record):
+        pass
+
+
 class _RedactSecrets(logging.Filter):
     """Токены ботов и пароли прокси не попадают в логи (их часто пересылают в чат поддержки)."""
     _rx = (re.compile(r"(bot|/)(\d{6,}):[A-Za-z0-9_-]{30,}"), re.compile(r"(://[^:/@\s]+):([^@\s]+)@"))
@@ -81,7 +97,7 @@ def setup_logging(level="INFO"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
     except Exception:
         pass
-    fh = RotatingFileHandler(LOGS_DIR / "fpcastor.log", maxBytes=3_000_000, backupCount=3, encoding="utf-8")
+    fh = _SafeRotatingHandler(LOGS_DIR / "fpcastor.log", maxBytes=3_000_000, backupCount=3, encoding="utf-8")
     bh = _BufferHandler()
     for h in (sh, fh, bh):
         h.setFormatter(fmt)
@@ -256,9 +272,27 @@ def load_json(path: Path, default):
 
 
 def save_json(path: Path, data):
+    """Атомарная запись. На Windows файл может держать OneDrive или антивирус — пробуем несколько раз,
+    в крайнем случае пишем поверх, чтобы настройки не потерялись."""
+    text = json.dumps(data, ensure_ascii=False, indent=2)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
+    for attempt in range(6):
+        try:
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            time.sleep(0.2 * (attempt + 1))
+        except OSError as e:
+            if attempt == 5:
+                logging.getLogger("duo").warning("Не удалось сохранить %s: %s", path.name, e)
+            time.sleep(0.2)
+    try:
+        path.write_text(text, encoding="utf-8")
+        tmp.unlink(missing_ok=True)
+    except Exception as e:
+        logging.getLogger("duo").error("❗ Не удалось сохранить %s: %s — файл занят другой программой "
+                                       "(OneDrive/антивирус?)", path.name, e)
 
 
 class Config:

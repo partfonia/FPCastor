@@ -237,15 +237,25 @@ class FunPayService:
         return self.lot_cache
 
     def raise_all(self, force=False) -> list:
-        report = []
+        report, raised, failed = [], [], []
         groups = self._groups(refresh=force)
         self.app.plugins.call("BIND_TO_PRE_LOTS_RAISE", self.app.cardinal, groups)
         for gid, g in groups.items():
+            if not self.app.running:
+                break
             if not force and time.time() < self.next_raise.get(gid, 0):
                 continue
-            res = self.client.raise_lots(gid, g["nodes"])
-            msg = re.sub(r"<[^>]+>", "", str(res.get("msg") or res.get("modal") or ""))
             name = ", ".join(g["names"][:3])
+            try:  # ошибка в одной категории не должна останавливать остальные
+                res = self.client.raise_lots(gid, g["nodes"])
+            except Exception as e:
+                self.next_raise[gid] = time.time() + 900
+                self.raise_info[gid] = f"⚠️ {name}: не удалось ({str(e)[:60]})"
+                failed.append(name)
+                report.append(self.raise_info[gid])
+                time.sleep(3)
+                continue
+            msg = re.sub(r"<[^>]+>", "", str(res.get("msg") or res.get("modal") or ""))
             if res.get("error") or re.search(r"подожд|wait|зачекай", msg, re.I):
                 wait = self._parse_wait(msg)
                 self.next_raise[gid] = time.time() + wait
@@ -254,10 +264,18 @@ class FunPayService:
                 self.next_raise[gid] = time.time() + 3600
                 self.raise_info[gid] = f"⬆️ {name}: подняты {datetime.now():%H:%M}"
                 self.app.stats.inc("raises")
-                log.info("🔵 FunPay: подняты лоты %s", name)
-                self.app.notify("raise", f"⬆️ FunPay{self.app.acc_tag(self.acc_id)}: подняты лоты <b>{esc(name)}</b>")
+                raised.append(name)
             report.append(self.raise_info[gid])
             time.sleep(1)
+        if raised:  # одна строка за круг вместо строки на каждую игру
+            more = f" и ещё {len(raised) - 5}" if len(raised) > 5 else ""
+            log.info("⬆️ FunPay%s: подняты лоты в %d %s: %s%s", self.app.acc_tag(self.acc_id), len(raised),
+                     "категории" if len(raised) == 1 else "категориях", "; ".join(raised[:5]), more)
+            self.app.notify("raise", f"⬆️ FunPay{self.app.acc_tag(self.acc_id)}: подняты лоты в {len(raised)} "
+                                     f"катег.\n<i>{esc('; '.join(raised[:10]))}{esc(more)}</i>")
+        if failed:
+            log.warning("⬆️ FunPay: не удалось поднять %d катег. (повторю через 15 мин): %s", len(failed),
+                        "; ".join(failed[:5]))
         self.app.plugins.call("BIND_TO_POST_LOTS_RAISE", self.app.cardinal, groups)
         return report
 

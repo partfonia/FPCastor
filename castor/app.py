@@ -67,6 +67,10 @@ class App:
     # ═════════ запуск / остановка ═════════
     def start(self):
         log.info("🚀 %s v%s запускается…", APP_NAME, VERSION)
+        self.onedrive = "onedrive" in str(BASE_DIR).lower()
+        if self.onedrive:
+            log.warning("☁️ Бот лежит в папке OneDrive (%s). OneDrive блокирует файлы, которые бот постоянно "
+                        "сохраняет, — возможны ошибки и потеря настроек. Перенесите папку, например в C:\\FPCastor", BASE_DIR)
         os.chdir(BASE_DIR)
         for p in (str(BASE_DIR), str(PLUGINS_DIR)):
             if p not in sys.path:
@@ -99,7 +103,11 @@ class App:
         self.notify("start", f"🚀 <b>{APP_NAME}</b> v{VERSION} запущен\n"
                              f"🔵 FunPay: {len(self.fp)} акк. · 🟢 Playerok: {len(self.pl)} акк.\n"
                              f"🌐 Прокси TG: {self.proxy.label()}"
-                             + (f"\n📱 Панель: {self.public_url}" if self.public_url else ""))
+                             + (f"\n📱 Панель: {self.public_url}" if self.public_url and self.cfg.get("web.tunnel") == "none" else
+                                "\n📱 Приложение подключается — пришлю сообщение, когда заработает"
+                                if self.cfg.get("web.enabled") and self.cfg.get("web.tunnel") != "none" else "")
+                             + ("\n\n☁️ <b>Бот лежит в папке OneDrive</b> — он может мешать сохранять настройки. "
+                                "Перенесите папку FPCastor, например в <code>C:\\FPCastor</code>." if self.onedrive else ""))
 
     def stop(self):
         self.running = False

@@ -207,6 +207,13 @@ class TunnelManager:
 
     def _loop(self):
         fails_in_row = 0
+        # ждём, пока бот выберет прокси Telegram, — он нужен для запасного способа и проверки
+        t0 = time.time()
+        while self.app.running and time.time() - t0 < 25:
+            tg = getattr(self.app, "tg", None)
+            if tg is None or getattr(tg, "ok", False) or getattr(self.app.proxy, "current", ""):
+                break
+            time.sleep(1)
         while self.app.running and self.mode != "none":
             order = self._order()
             self._reset.clear()

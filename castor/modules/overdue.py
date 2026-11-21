@@ -14,6 +14,8 @@ from . import Module
 
 class OverdueModule(Module):
     KEY = "overdue"
+    GROUP = "Заказы"
+    ORDER = 50
     NAME = "Просроченные заказы"
     ICON = "🎫"
     DESCRIPTION = "Покупатель долго не подтверждает заказ — бот готовит обращение в поддержку FunPay и присылает его вам."

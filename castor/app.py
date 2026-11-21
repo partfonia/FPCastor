@@ -218,6 +218,8 @@ class App:
         """manual=True — ответ человека из Telegram / мини-аппа (подпись по настройке watermark_manual)."""
         if not text or chat_id is None or str(chat_id) == "None":
             return False
+        if getattr(self, "modules", None):
+            text = self.modules.on_send(platform, chat_id, text, manual)  # перевод и т.п.
         text = apply_watermark(self.cfg, text, manual)
         svc = self.service(platform, account)
         if not svc or not svc.ok and platform == "playerok":

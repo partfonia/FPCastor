@@ -23,6 +23,8 @@ def in_window(frm: str, to: str, days: list, now: datetime = None) -> bool:
 
 class LotScheduleModule(Module):
     KEY = "lotschedule"
+    GROUP = "Лоты и цены"
+    ORDER = 50
     NAME = "Расписание лотов"
     ICON = "🕰"
     DESCRIPTION = "Выключает лоты FunPay на ночь (или в выбранные дни) и включает их обратно по расписанию."

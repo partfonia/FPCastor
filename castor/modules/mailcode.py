@@ -92,6 +92,8 @@ def fetch_code(box: dict, max_age_min: float = 20) -> tuple:
 
 class MailCodeModule(Module):
     KEY = "mailcode"
+    GROUP = "Выдача"
+    ORDER = 40
     NAME = "Коды с почты"
     ICON = "📧"
     DESCRIPTION = "Покупатель пишет !код — бот берёт свежий код подтверждения из нужной почты (IMAP) и присылает его."

@@ -14,6 +14,8 @@ from . import Module
 
 class AutoPriceModule(Module):
     KEY = "autoprice"
+    GROUP = "Лоты и цены"
+    ORDER = 50
     NAME = "Автоцена"
     ICON = "💹"
     DESCRIPTION = "Подстраивает цену лотов под конкурентов: на шаг дешевле самого дешёвого, но не ниже вашего минимума."

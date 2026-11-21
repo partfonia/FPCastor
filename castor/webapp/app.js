@@ -470,9 +470,12 @@ function more() {
 let MODS = [];
 async function modulesView() {
   const j = await api("modules"); MODS = j.modules || [];
-  view(`${title("Модули")}<p class="hint" style="margin:0 6px 10px">Дополнительные функции бота. Включите нужные и настройте.</p>
-    <div class="group">${MODS.map(m => `<button class="item" onclick="push(moduleView,'${m.key}')"><span class="ic">${m.icon}</span>
-      <span class="tx"><b>${H(m.name)}</b><span>${getPath("modules." + m.key + ".enabled") ? "🟢 " + H(m.status || "включён") : "выключен"}</span></span><span class="chev">›</span></button>`).join("")}</div>
+  const groups = ["Выдача", "Общение", "Лоты и цены", "Заказы", "Деньги", "Безопасность", "Прочее"];
+  [...new Set(MODS.map(m => m.group))].forEach(g => { if (!groups.includes(g)) groups.push(g); });
+  const on = MODS.filter(m => getPath("modules." + m.key + ".enabled")).length;
+  view(`${title("Модули")}<p class="hint" style="margin:0 6px 10px">Дополнительные функции бота. Включено ${on} из ${MODS.length}.</p>
+    ${groups.map(g => { const list = MODS.filter(m => m.group === g); return list.length ? `<h3>${H(g)}</h3><div class="group">${list.map(m => `<button class="item clamp" onclick="push(moduleView,'${m.key}')"><span class="ic">${m.icon}</span>
+      <span class="tx"><b>${H(m.name)}</b><span>${getPath("modules." + m.key + ".enabled") ? "🟢 " + H(m.status || "включён") : H(m.description)}</span></span><span class="chev">›</span></button>`).join("")}</div>` : ""; }).join("")}
     <p class="hint" style="margin:10px 6px">Свои плагины — в «Настройки → Свои плагины».</p>`);
 }
 function modField(base, f) {

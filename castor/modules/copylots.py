@@ -14,6 +14,8 @@ from . import Module
 
 class CopyLotsModule(Module):
     KEY = "copylots"
+    GROUP = "Лоты и цены"
+    ORDER = 50
     NAME = "Копирование лотов"
     ICON = "📑"
     DESCRIPTION = "Переносит лоты с одного аккаунта FunPay на другой: текст, цена и поля категории."

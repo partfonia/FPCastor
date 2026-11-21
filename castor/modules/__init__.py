@@ -28,6 +28,8 @@ MOD_DIR = DATA_DIR / "modules"
 
 class Module:
     KEY = ""
+    ORDER = 50          # порядок обработки заказа: меньше — раньше (проверка покупателя идёт первой)
+    GROUP = "Прочее"    # раздел в меню модулей
     NAME = ""
     ICON = "🧩"
     DESCRIPTION = ""
@@ -79,6 +81,9 @@ class Module:
     def on_order(self, o) -> bool:
         return False
 
+    def on_send(self, platform, chat_id, text, manual) -> str:
+        return text
+
     def tick(self):
         pass
 
@@ -102,7 +107,8 @@ class ModuleManager:
         from .copylots import CopyLotsModule
         from .lotschedule import LotScheduleModule
         self.modules: dict = {}
-        for cls in (RentModule, MailCodeModule, OverdueModule, AutoPriceModule, CopyLotsModule, LotScheduleModule):
+        from .extra import ALL as EXTRA
+        for cls in (RentModule, MailCodeModule, OverdueModule, AutoPriceModule, CopyLotsModule, LotScheduleModule, *EXTRA):
             try:
                 self.modules[cls.KEY] = cls(app)
             except Exception as e:  # модуль не должен ронять бота
@@ -140,7 +146,7 @@ class ModuleManager:
             return False
 
     def active(self):
-        return [m for m in self.modules.values() if m.enabled]
+        return sorted((m for m in self.modules.values() if m.enabled), key=lambda m: m.ORDER)
 
     def _safe(self, m, fn, *a):
         try:
@@ -156,11 +162,19 @@ class ModuleManager:
                 return True
         return False
 
-    def on_order(self, o) -> bool:
+    def on_order(self, o, skip=()) -> bool:
         for m in self.active():
-            if o.platform in m.PLATFORMS and self._safe(m, "on_order", o):
+            if m.KEY not in skip and o.platform in m.PLATFORMS and self._safe(m, "on_order", o):
                 return True
         return False
+
+    def on_send(self, platform, chat_id, text, manual) -> str:
+        for m in self.active():
+            if platform in m.PLATFORMS:
+                out = self._safe(m, "on_send", platform, chat_id, text, manual)
+                if isinstance(out, str) and out:
+                    text = out
+        return text
 
     def tick(self):
         for m in self.active():
@@ -173,7 +187,7 @@ class ModuleManager:
         out = []
         for key, m in self.modules.items():
             out.append({"key": key, "name": m.NAME, "icon": m.ICON, "description": m.DESCRIPTION,
-                        "enabled": m.enabled, "status": self._safe(m, "status") or "",
+                        "enabled": m.enabled, "status": self._safe(m, "status") or "", "group": m.GROUP,
                         "platforms": list(m.PLATFORMS), "fields": m.FIELDS, "item_fields": m.ITEM_FIELDS,
                         "actions": self._safe(m, "actions") or []})
         return out
@@ -181,3 +195,43 @@ class ModuleManager:
 
 def now() -> float:
     return time.time()
+
+
+def order_to_dict(o) -> dict:
+    return {"platform": o.platform, "id": str(o.id), "title": o.title, "price": o.price, "buyer": o.buyer,
+            "buyer_id": o.buyer_id, "chat_id": o.chat_id, "amount": o.amount, "account": o.account}
+
+
+def order_from_dict(app, d):
+    from ..core import UOrder
+    o = UOrder(d["platform"], d["id"], d.get("title", ""), d.get("price", 0), d.get("buyer", ""), d.get("buyer_id"),
+               d.get("chat_id"), d.get("amount", 1), account=d.get("account"))
+    o._app = app
+    return o
+
+
+def continue_order(app, o, skip=()):
+    """Продолжить обработку заказа после того, как модуль его придержал (проверка, вопрос покупателю…)."""
+    if app.modules.on_order(o, skip=skip):
+        return True
+    acc_cfg = app.cfg.account(o.account) or {}
+    if app.cfg.get(f"{o.platform}.auto_delivery", True) and acc_cfg.get("auto_delivery", True):
+        return app.deliver(o)
+    return False
+
+
+def send_file_to_owners(app, path, caption=""):
+    tg = getattr(app, "tg", None)
+    if not tg or not tg.bot:
+        return 0
+    n = 0
+    for u in app.team.users():
+        if u.get("role") != "owner":
+            continue
+        try:
+            with open(path, "rb") as f:
+                tg.bot.send_document(u["id"], f, caption=caption[:1000] or None)
+            n += 1
+        except Exception as e:
+            log.warning("Не отправился файл владельцу %s: %s", u.get("id"), e)
+    return n

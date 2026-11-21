@@ -46,6 +46,8 @@ def human_left(sec: float) -> str:
 
 class RentModule(Module):
     KEY = "rent"
+    GROUP = "Выдача"
+    ORDER = 30
     NAME = "Аренда аккаунтов"
     ICON = "🎮"
     DESCRIPTION = ("Выдаёт аккаунты в аренду по таймеру: Steam, Dota 2, Valorant, FACEIT, VIP Roblox и любые другие. "

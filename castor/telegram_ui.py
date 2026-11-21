@@ -546,12 +546,23 @@ class TelegramUI:
         return "Раздел не найден", [back]
 
     # ═══════════════ встроенные модули ═══════════════
+    MOD_GROUPS = ("Выдача", "Общение", "Лоты и цены", "Заказы", "Деньги", "Безопасность", "Прочее")
+
     def mods_menu(self):
-        text = "<b>🧩 Модули</b>\n\nДополнительные функции. Нажмите на модуль, чтобы включить и настроить.\n"
+        mods = self.app.modules.describe()
+        on = sum(1 for d in mods if d["enabled"])
+        text = (f"<b>🧩 Модули</b>\n\nДополнительные функции — как плагины, но уже встроены. "
+                f"Включено {on} из {len(mods)}.\nНажмите на модуль: описание, настройки, включение.")
         rows = []
-        for d in self.app.modules.describe():
-            text += f"\n{d['icon']} <b>{esc(d['name'])}</b> {'🟢' if d['enabled'] else '⚪️'}\n<i>{esc(d['description'])}</i>\n"
-            rows.append([(f"{d['icon']} {d['name']} {'🟢' if d['enabled'] else '⚪️'}", f"duo:mod:{d['key']}", "settings")])
+        groups = list(self.MOD_GROUPS) + sorted({d["group"] for d in mods} - set(self.MOD_GROUPS))
+        for g in groups:
+            items = [d for d in mods if d["group"] == g]
+            if not items:
+                continue
+            rows.append([(f"━━  {g}  ━━", "duo:noop")])
+            for k in range(0, len(items), 2):
+                rows.append([(f"{d['icon']} {d['name']}{' ✅' if d['enabled'] else ''}", f"duo:mod:{d['key']}", "settings")
+                             for d in items[k:k + 2]])
         rows.append([("🔌 Свои плагины", "duo:plg:0", "plugins")])
         rows.append([("◀️ Назад", "duo:main")])
         return text, rows

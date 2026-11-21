@@ -551,7 +551,9 @@ class TelegramUI:
     def mods_menu(self):
         mods = self.app.modules.describe()
         on = sum(1 for d in mods if d["enabled"])
-        extra = [i for i in self.app.plugins.plugins.values() if not getattr(i, "module_key", None)]
+        mine = list(self.app.plugins.plugins.values())
+        mine_keys = {i.module_key for i in mine if getattr(i, "module_key", None)}
+        mods = [d for d in mods if d["key"] not in mine_keys]
         text = (f"<b>🧩 Плагины</b>\n\nВключено {on} из {len(mods)}. Нажмите на плагин — там описание, "
                 f"настройки и кнопка включения.\n\n📥 Свой плагин: просто отправьте .py файл в этот чат.")
         rows = []
@@ -564,14 +566,24 @@ class TelegramUI:
             for k in range(0, len(items), 2):
                 rows.append([(f"{d['icon']} {d['name']}{' ✅' if d['enabled'] else ''}", f"duo:mod:{d['key']}", "settings")
                              for d in items[k:k + 2]])
-        if extra:
+        if mine:
             rows.append([("━━  Установленные вами  ━━", "duo:noop")])
-            for k in range(0, len(extra), 2):
-                rows.append([(f"📥 {i.name[:24]}{' ✅' if self.app.plugins.enabled(i.uuid) else ''}", f"duo:pi:{i.uuid}", "plugins")
-                             for i in extra[k:k + 2]])
+            for k in range(0, len(mine), 2):
+                rows.append([self._mine_btn(i) for i in mine[k:k + 2]])
         rows.append([("📂 Файлы плагинов", "duo:plg:0", "plugins"), ("🔑 Лицензии", "duo:lic", "secrets")])
         rows.append([("◀️ Назад", "duo:main")])
         return text, rows
+
+    def _mine_btn(self, i):
+        """Кнопка плагина из файла: плагин с настройками открывает экран настроек, остальные — карточку."""
+        key = getattr(i, "module_key", None)
+        m = self.app.modules.get(key) if key else None
+        if m:
+            return (f"{m.ICON} {m.NAME[:24]}{' ✅' if m.enabled else ''}", f"duo:mod:{key}", "settings")
+        return (f"📥 {i.name[:24]}{' ✅' if self.app.plugins.enabled(i.uuid) else ''}", f"duo:pi:{i.uuid}", "plugins")
+
+    def _plugin_of(self, key):
+        return next((i for i in self.app.plugins.plugins.values() if getattr(i, "module_key", None) == key), None)
 
     def mod_card(self, key):
         m = self.app.modules.get(key)
@@ -612,6 +624,10 @@ class TelegramUI:
                 rows.append([("📱 Настроить в панели", ("webapp", url))])
         for aid, label in (self.app.modules._safe(m, "actions") or []):
             rows.append([(label, f"duo:mod:{key}:act:{aid}"[:64], "settings")])
+        src = self._plugin_of(key)
+        if src:
+            text += f"\n📄 Установлен вами: <code>{esc(src.path.name)}</code> · v{esc(src.version)}"
+            rows.append([("🗑 Удалить плагин", f"duo:pdel:{src.uuid}", "plugins")])
         rows.append([("◀️ Плагины", "duo:mods")])
         return text, rows
 
@@ -1307,13 +1323,15 @@ class TelegramUI:
 
     def plugins_menu(self, offset=0):
         pls = list(self.app.plugins.plugins.values())
-        text = (f"<b>📂 Файлы плагинов</b> ({len(pls)})\nЗдесь плагины, установленные вами из файлов: включить, "
-                f"выключить, удалить. Чтобы установить новый — отправьте .py файл в этот чат.\n")
+        text = (f"<b>📂 Файлы плагинов</b> ({len(pls)})\nПлагины, установленные вами. Нажмите на плагин — откроются "
+                f"его настройки. Чтобы установить новый — отправьте .py файл в этот чат.\n")
         if self.app.plugins.failed:
             text += "\n⚠️ Не загрузились: " + ", ".join(esc(f["file"]) for f in self.app.plugins.failed)
         rows = []
         for i in pls[offset:offset + 8]:
-            rows.append([(f"{onoff(self.app.plugins.enabled(i.uuid))} {i.name[:28]}", f"duo:pi:{i.uuid}")])
+            m = self.app.modules.get(i.module_key) if getattr(i, "module_key", None) else None
+            on = m.enabled if m else self.app.plugins.enabled(i.uuid)
+            rows.append([(f"{onoff(on)} {i.name[:28]}{' ⚙️' if m or i.settings_page else ''}", f"duo:pi:{i.uuid}")])
         nav = []
         if offset > 0:
             nav.append(("⬅️", f"duo:plg:{max(0, offset - 8)}"))
@@ -1328,6 +1346,8 @@ class TelegramUI:
         i = self.app.plugins.plugins.get(uid)
         if not i:
             return "Плагин не найден", [[("◀️ Плагины", "duo:mods")]]
+        if getattr(i, "module_key", None) and self.app.modules.get(i.module_key):
+            return self.mod_card(i.module_key)
         en = self.app.plugins.enabled(uid)
         text = (f"<b>🧩 {esc(i.name)}</b> v{esc(i.version)}\n{esc(i.description)}\n\n"
                 f"Автор: {esc(i.credits)}\nТип: {i.kind}\nФайл: <code>{esc(i.path.name)}</code>\n"
@@ -1337,6 +1357,8 @@ class TelegramUI:
         rows = [[(f"{onoff(en)} {'Выключить' if en else 'Включить'}", f"duo:ptog:{uid}")]]
         if i.settings_page:
             rows.append([("⚙️ Настройки", f"{CBT.PLUGIN_SETTINGS}:{uid}:0")])
+        else:
+            text += "\n\n<i>У этого плагина нет своего экрана настроек — он работает сразу после включения.</i>"
         rows.append([("🗑 Удалить", f"duo:pdel:{uid}"), ("◀️ Плагины", "duo:mods")])
         return text, rows
 

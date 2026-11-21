@@ -37,6 +37,7 @@ class PluginInfo:
         self.settings_page = bool(getattr(m, "SETTINGS_PAGE", False))
         self.commands = []
         self.error = None
+        self.module_key = None
         self.hooks: dict = {}
         for attr in dir(m):
             if attr.startswith("BIND_TO_"):
@@ -56,7 +57,8 @@ class PluginInfo:
     def to_dict(self, enabled):
         return {"uuid": self.uuid, "name": self.name, "version": self.version, "description": self.description,
                 "credits": self.credits, "file": self.path.name, "enabled": enabled, "kind": self.kind,
-                "settings": self.settings_page, "hooks": sorted(self.hooks), "commands": self.commands}
+                "settings": self.settings_page, "hooks": sorted(self.hooks), "commands": self.commands,
+                "module": getattr(self, "module_key", None)}
 
 
 class PluginManager:

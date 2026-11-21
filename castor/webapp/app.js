@@ -497,16 +497,26 @@ async function setLic(id) {
 }
 
 /* ───────── встроенные модули ───────── */
+async function openModule(key) {
+  if (!MODS.find(m => m.key === key)) MODS = (await api("modules")).modules || [];
+  push(moduleView, key);
+}
 let MODS = [];
 async function modulesView() {
   const j = await api("modules"); MODS = j.modules || [];
   const groups = ["Аренда", "Выдача", "Перепродажа", "Общение", "Лоты и цены", "Заказы", "Деньги", "Безопасность", "Прочее"];
   [...new Set(MODS.map(m => m.group))].forEach(g => { if (!groups.includes(g)) groups.push(g); });
+  let MINE = [];
+  try { MINE = can("plugins") ? (await api("plugins")).plugins || [] : []; } catch (e) {}
+  const mineKeys = new Set(MINE.map(p => p.module).filter(Boolean));
   const on = MODS.filter(m => getPath("modules." + m.key + ".enabled")).length;
   view(`${title("Плагины")}<p class="hint" style="margin:0 6px 10px">Включено ${on} из ${MODS.length}. Нажмите на плагин — там описание, настройки и включение.</p>
-    ${groups.map(g => { const list = MODS.filter(m => m.group === g); return list.length ? `<h3>${H(g)}</h3><div class="group">${list.map(m => `<button class="item clamp" onclick="push(moduleView,'${m.key}')"><span class="ic">${m.icon}</span>
+    ${groups.map(g => { const list = MODS.filter(m => m.group === g && !mineKeys.has(m.key)); return list.length ? `<h3>${H(g)}</h3><div class="group">${list.map(m => `<button class="item clamp" onclick="push(moduleView,'${m.key}')"><span class="ic">${m.icon}</span>
       <span class="tx"><b>${H(m.name)}</b><span>${getPath("modules." + m.key + ".enabled") ? "🟢 " + H(m.status || "включён") : H(m.description)}</span></span><span class="chev">›</span></button>`).join("")}</div>` : ""; }).join("")}
-    ${can("plugins") ? `<h3>Установленные вами</h3><div class="group"><button class="item" onclick="push(pluginsView)"><span class="ic">📂</span><span class="tx"><b>Файлы плагинов</b><span>установить .py, включить, удалить</span></span><span class="chev">›</span></button></div>` : ""}`);
+    ${can("plugins") ? `<h3>Установленные вами</h3><div class="group">${MINE.map(p => { const m = p.module && MODS.find(x => x.key === p.module);
+      return m ? `<button class="item clamp" onclick="push(moduleView,'${m.key}')"><span class="ic">${m.icon}</span><span class="tx"><b>${H(m.name)}</b><span>${getPath("modules." + m.key + ".enabled") ? "🟢 " + H(m.status || "включён") : H(m.description)}</span></span><span class="chev">›</span></button>`
+        : `<button class="item clamp" onclick="push(pluginsView)"><span class="ic">📥</span><span class="tx"><b>${H(p.name)}</b><span>${p.enabled ? "🟢 включён" : "выключен"} · ${H(p.description || p.file)}</span></span><span class="chev">›</span></button>`; }).join("")}
+      <button class="item" onclick="push(pluginsView)"><span class="ic">📂</span><span class="tx"><b>Файлы плагинов</b><span>установить .py, удалить, перезагрузить</span></span><span class="chev">›</span></button></div>` : ""}`);
 }
 function modField(base, f) {
   const [path, label, type, extra] = f, P = base + "." + path;
@@ -776,7 +786,7 @@ async function pluginsView() {
     <div class="group">${j.plugins.map(p => `<div class="item"><span class="ic">🧩</span><div class="tx"><b>${H(p.name)} <span class="hint">v${H(p.version)}</span></b>
       <span>${H(p.description || p.file)} · ${H(p.kind)}${p.credits ? " · " + H(p.credits) : ""}</span></div>
       <label class="sw"><input type="checkbox" ${p.enabled ? "checked" : ""} aria-label="Включить ${H(p.name)}" onchange="api('plugins/toggle',{uuid:'${p.uuid}'}).then(()=>toast(this.checked?'Включён':'Выключен'))"><i></i></label></div>
-      <div class="field row" style="justify-content:flex-end"><button class="btn ghost sm" onclick="api('plugins/reload',{uuid:'${p.uuid}'}).then(j=>j.ok&&toast('Перезагружен'))">Перезагрузить</button>
+      <div class="field row" style="justify-content:flex-end">${p.module ? `<button class="btn sm" onclick="openModule('${H(p.module)}')">⚙️ Настроить</button>` : ""}<button class="btn ghost sm" onclick="api('plugins/reload',{uuid:'${p.uuid}'}).then(j=>j.ok&&toast('Перезагружен'))">Перезагрузить</button>
       <button class="btn danger sm" onclick="confirmBox('Удалить плагин ${H(p.name)}?').then(ok=>ok&&api('plugins/delete',{uuid:'${p.uuid}'}).then(pluginsView))">Удалить</button></div>`).join("")
       || `<div class="empty"><b>Плагинов не установлено</b>Загрузите .py файл ниже, отправьте его боту в Telegram или положите в папку plugins.</div>`}</div>
     ${j.failed.length ? `<h3>Не загрузились</h3><div class="group">${j.failed.map(f => `<div class="item"><span class="ic">⚠️</span><div class="tx"><b>${H(f.file)}</b><span>${H(f.error)}</span></div></div>`).join("")}</div>` : ""}

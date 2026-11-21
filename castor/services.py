@@ -351,7 +351,7 @@ class PlayerokService:
                         chat_id or _g(deal, "chat", "id"), _g(deal, "amount", default=1) or 1, raw=ev,
                         account=self.acc_id)
             self.app.on_order(uo)
-        elif et == "DEAL_CONFIRMED":
+        elif et in ("DEAL_CONFIRMED", "DEAL_CONFIRMED_AUTOMATICALLY"):
             deal = ev.deal
             did = _g(deal, "id")
             if self.app.state.get("confirmed", f"pl:{did}"):

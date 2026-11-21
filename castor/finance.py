@@ -83,7 +83,7 @@ class WithdrawManager:
                 pass
             return svc.client.balance, False, svc.acc_id
         acc = svc.bridge.acc
-        for path in (("profile", "balance", "available"), ("balance", "available")):
+        for path in (("profile", "balance", "withdrawable"), ("profile", "balance", "available"), ("balance", "available")):
             v = _g(acc, *path)
             if isinstance(v, (int, float)):
                 return float(v), True, svc.acc_id

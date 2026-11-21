@@ -5,7 +5,7 @@ import importlib
 import inspect
 import re
 
-from .bootstrap import ensure_playerok_lib
+from .bootstrap import playerok_status
 from .core import DEFAULT_UA, Config, _g
 
 
@@ -20,8 +20,9 @@ class PlayerokBridge:
         self.lib = None
 
     def connect(self):
-        if not ensure_playerok_lib():
-            raise RuntimeError("Библиотека playerokapi недоступна (нужен Python 3.11+)")
+        ok, why = playerok_status()
+        if not ok:
+            raise RuntimeError(why)
         from playerokapi.account import Account  # type: ignore
         self.lib = importlib.import_module("playerokapi")
         params = inspect.signature(Account.__init__).parameters
@@ -117,7 +118,7 @@ class PlayerokBridge:
             if e is not None and provider in e.__members__:
                 prov = e[provider]
                 break
-        values = {"provider": prov, "account": wallet, "value": amount, "amount": amount,
+        values = {"provider": prov, "account": wallet, "value": int(amount), "amount": int(amount),
                   "sbp_bank_member_id": sbp_bank or None, "payment_method_id": None}
         kw = {k: v for k, v in values.items() if k in params and v is not None}
         missing = [k for k, prm in params.items() if k != "self" and prm.default is inspect.Parameter.empty

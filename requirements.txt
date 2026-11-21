@@ -2,5 +2,7 @@ requests>=2.31
 beautifulsoup4>=4.12
 pyTelegramBotAPI>=4.20
 PySocks>=1.7
-# Для Playerok (Python 3.11+), ставится автоматически, если включить площадку:
-# playerokapi
+# для Playerok (библиотека playerokapi встроена в castor/vendor)
+curl_cffi>=0.7
+wrapper-tls-requests>=1.1
+websocket-client>=1.7

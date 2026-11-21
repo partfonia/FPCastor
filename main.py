@@ -15,6 +15,7 @@ import sys
 ROOT = os.path.dirname(os.path.abspath(__file__))
 os.chdir(ROOT)
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "castor", "vendor"))  # встроенная библиотека Playerok
 
 if sys.version_info < (3, 9):
     print("Нужен Python 3.9+ (для Playerok — 3.11+). Скачайте: https://www.python.org/downloads/")

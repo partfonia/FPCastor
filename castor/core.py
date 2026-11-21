@@ -70,8 +70,21 @@ def setup_logging(level="INFO"):
     for h in (sh, fh, bh):
         h.setFormatter(fmt)
         root.addHandler(h)
-    for noisy in ("urllib3", "TeleBot", "telebot", "httpx", "websockets", "asyncio", "charset_normalizer"):
-        logging.getLogger(noisy).setLevel(logging.WARNING)
+    quiet_libraries()
+
+
+NOISY_LOGGERS = ("urllib3", "TeleBot", "telebot", "httpx", "websockets", "websocket", "asyncio", "charset_normalizer",
+                 "TLSLibrary", "tls_requests", "curl_cffi", "playerokapi")
+
+
+def quiet_libraries():
+    """Сторонние библиотеки пишут в консоль только предупреждения и ошибки, без своих дублей."""
+    for name in NOISY_LOGGERS:
+        lg = logging.getLogger(name)
+        lg.setLevel(logging.WARNING)
+        for h in list(lg.handlers):
+            lg.removeHandler(h)
+        lg.propagate = True
 
 
 log = logging.getLogger("duo")
@@ -749,13 +762,71 @@ def proxy_label(p: str) -> str:
     return normalize_proxy(p).split("@")[-1] if p else "напрямую"
 
 
-def check_proxy(p: str, url="https://api.telegram.org", timeout=8) -> tuple:
-    t = time.time()
-    try:
-        requests.get(url, proxies=proxies_dict(p), timeout=timeout)
-        return True, round((time.time() - t) * 1000)
-    except Exception as e:
-        return False, str(e)[:140]
+def _proxy_variants(p: str) -> list:
+    """Варианты подключения к одному прокси: socks5h (DNS через прокси), socks5, http."""
+    n = normalize_proxy(p)
+    if not n:
+        return [""]
+    scheme, rest = n.split("://", 1)
+    order = {"socks5": ["socks5h", "socks5", "http"], "socks5h": ["socks5h", "socks5", "http"],
+             "socks4": ["socks4a", "socks4"], "http": ["http", "socks5h"], "https": ["https", "http", "socks5h"]}
+    return [f"{sc}://{rest}" for sc in order.get(scheme, [scheme])]
+
+
+def _proxy_reason(err: Exception) -> str:
+    s = f"{type(err).__name__}: {err}".lower()
+    if "407" in s or "authentication" in s or "auth" in s and "socks" in s or "0x01" in s and "socks" in s:
+        return "неверный логин или пароль прокси"
+    if "refused" in s or "10061" in s:
+        return "прокси отклоняет подключение — проверьте IP и порт"
+    if "timed out" in s or "timeout" in s:
+        return "прокси не отвечает — проверьте IP и порт, не закончился ли срок, и не привязан ли прокси к вашему IP"
+    if "name resolution" in s or "getaddrinfo" in s:
+        return "не удаётся найти адрес прокси — проверьте, что он записан правильно"
+    if "missing dependencies for socks" in s:
+        return "не установлен PySocks — запустите install.bat заново"
+    return "прокси не работает"
+
+
+def diagnose_proxy(p: str, url="https://api.telegram.org", timeout=12) -> dict:
+    """Проверяет прокси и объясняет причину, если не работает.
+    → {"ok", "ms", "proxy" (рабочий вариант строки), "reason", "country"}"""
+    if not p:
+        t = time.time()
+        try:
+            requests.get(url, timeout=timeout)
+            return {"ok": True, "ms": round((time.time() - t) * 1000), "proxy": "", "reason": "", "country": ""}
+        except Exception as e:
+            return {"ok": False, "ms": None, "proxy": "", "reason": "нет прямой связи", "country": "", "error": str(e)}
+    variants, last = _proxy_variants(p), None
+    for v in variants:
+        t = time.time()
+        try:
+            requests.get(url, proxies={"http": v, "https": v}, timeout=timeout)
+            return {"ok": True, "ms": round((time.time() - t) * 1000), "proxy": v, "reason": "", "country": ""}
+        except Exception as e:
+            last = e
+    # Telegram не открылся — жив ли прокси вообще и откуда он
+    for v in variants:
+        try:
+            j = requests.get("http://ip-api.com/json/?fields=status,country,countryCode&lang=ru",
+                             proxies={"http": v, "https": v}, timeout=10).json()
+        except Exception:
+            continue
+        country, code = j.get("country", ""), j.get("countryCode", "")
+        if code in ("RU", "BY", "IR", "CN"):
+            why = (f"прокси работает, но он из страны «{country}» — там Telegram заблокирован, и через этот прокси "
+                   f"его тоже не открыть. Нужен зарубежный прокси: Нидерланды, Германия, Финляндия и т.п.")
+        else:
+            why = f"прокси работает (страна: {country or '?'}), но через него не открывается {url.split('/')[2]}"
+        return {"ok": False, "ms": None, "proxy": v, "reason": why, "country": country, "alive": True}
+    return {"ok": False, "ms": None, "proxy": "", "reason": _proxy_reason(last), "country": "", "error": str(last)[:200]}
+
+
+def check_proxy(p: str, url="https://api.telegram.org", timeout=12) -> tuple:
+    """(ok, мс | понятная причина). Подбирает тип подключения сам (socks5h/socks5/http)."""
+    d = diagnose_proxy(p, url, timeout)
+    return (True, d["ms"]) if d["ok"] else (False, d["reason"])
 
 
 def in_work_hours(cfg: Config) -> bool:

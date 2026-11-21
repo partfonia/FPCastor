@@ -44,6 +44,8 @@ class PlayerokBridge:
             kw["proxy"] = proxy
         acc = Account(**kw)
         self.acc = acc.get() if hasattr(acc, "get") else acc
+        from .core import quiet_libraries
+        quiet_libraries()  # библиотека TLS настраивает свой вывод при первом запуске
         self.id = getattr(self.acc, "id", None)
         self.username = getattr(self.acc, "username", None)
         self.ok = True

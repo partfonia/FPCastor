@@ -17,8 +17,8 @@ import requests
 from . import APP_NAME, VERSION
 from .bootstrap import REQUIRED_PACKAGES, Spinner, pip_install, playerok_status, PLAYEROK_DEPS
 from .branding import BANNER_ART
-from .core import (BASE_DIR, CONFIG_PATH, DEFAULT_UA, PLUGINS_DIR, Config, check_proxy, log, proxies_dict,
-                   proxy_label, rand_password, setup_logging)
+from .core import (BASE_DIR, CONFIG_PATH, DEFAULT_UA, PLUGINS_DIR, Config, check_proxy, diagnose_proxy, log,
+                   normalize_proxy, proxies_dict, proxy_label, rand_password, setup_logging)
 from .funpay import FunPayClient
 from .playerok import PlayerokBridge
 
@@ -239,7 +239,7 @@ def _step_platform(cfg: Config, platform: str, n: int):
                 return
             a.update(token=extract_pl_token(raw), cookies="")
         if ask_yes("Подключать этот аккаунт через прокси?", False):
-            a["proxy"] = _ask_proxy("для площадки", "https://funpay.com" if fp else "https://playerok.com")
+            a["proxy"], _ = _ask_proxy("для площадки", "https://funpay.com" if fp else "https://playerok.com")
         uname = None
         with Spinner("Вхожу в аккаунт…"):
             try:
@@ -269,20 +269,28 @@ def _step_platform(cfg: Config, platform: str, n: int):
             return
 
 
-def _ask_proxy(purpose: str, test_url: str) -> str:
-    info("Форматы: socks5://логин:пароль@ip:порт · http://ip:порт · ip:порт:логин:пароль")
+def _ask_proxy(purpose: str, test_url: str) -> tuple:
+    """→ (прокси, проверен ли). Пустая строка — без прокси."""
+    info("Форматы: socks5://логин:пароль@ip:порт · http://логин:пароль@ip:порт · ip:порт:логин:пароль")
     while True:
         p = ask_text(f"Прокси {purpose} (Enter — без прокси)")
         if not p:
-            return ""
-        with Spinner("Проверяю прокси…"):
-            good, res = check_proxy(p, test_url)
-        if good:
-            ok(f"Прокси работает: {proxy_label(p)}, ответ за {res} мс")
-            return p
-        bad(f"Прокси не отвечает: {res}")
-        if not ask_yes("Попробовать другой?", True):
-            return p if ask_yes("Сохранить этот прокси всё равно?", False) else ""
+            return "", False
+        with Spinner("Проверяю прокси — пробую разные типы подключения (до 30 с)…"):
+            d = diagnose_proxy(p, test_url)
+        if d["ok"]:
+            note = "" if normalize_proxy(p) == d["proxy"] else f" {D}(подошёл тип {d['proxy'].split('://')[0]}){R}"
+            ok(f"Прокси работает: {proxy_label(p)}, ответ за {d['ms']} мс{note}")
+            return d["proxy"], True
+        bad(d["reason"])
+        if not d.get("alive"):
+            info("Проверьте в кабинете продавца прокси: тип (SOCKS5 или HTTP), порт, срок действия и привязку к IP")
+        c = choose("Что дальше?", [("Ввести другой прокси", ""), ("Сохранить этот прокси и проверить при запуске", ""),
+                                    ("Продолжить без прокси", "")], default=1)
+        if c == 2:
+            return normalize_proxy(p), False
+        if c == 3:
+            return "", False
 
 
 # ---------- Telegram ----------
@@ -310,23 +318,32 @@ def _step_telegram(cfg: Config, n: int):
             return
     plist = cfg.get("telegram.proxy.list", []) or [""]
     proxy = plist[0] if cfg.get("telegram.proxy.enabled") else ""
+    if not t.get("password"):
+        t["password"] = rand_password()
     while True:
         with Spinner("Проверяю бота…"):
             try:
                 me = _tg(token, "getMe", proxy)
-                err = None if me.get("ok") else me.get("description", "Telegram отклонил токен")
+                err = None if me.get("ok") else ("Telegram не принял токен — проверьте, что скопировали его целиком"
+                                                 if me.get("error_code") in (401, 404) else me.get("description", "ошибка Telegram"))
             except Exception:
                 me, err = {}, "нет связи с Telegram"
         if not err:
             break
         bad(err)
         if "нет связи" in err:
-            info("Похоже, api.telegram.org недоступен. Нужен прокси (не MTProto — подойдёт socks5 или http)")
-            proxy = _ask_proxy("для Telegram", "https://api.telegram.org")
+            info("api.telegram.org недоступен с этого компьютера" + (" даже через прокси" if proxy else "") +
+                 ". Нужен зарубежный прокси SOCKS5 или HTTP (MTProto не подходит) — или включите VPN на компьютере")
+            proxy, verified = _ask_proxy("для Telegram", "https://api.telegram.org")
             if proxy:
                 t["proxy"]["list"] = [proxy] + [x for x in t["proxy"].get("list", []) if x != proxy]
                 t["proxy"]["enabled"] = True
-                continue
+                if verified:
+                    continue  # прокси рабочий — проверяем бота ещё раз
+            t["token"] = token  # сохраняем токен, связь проверим при запуске
+            warn("Сохранил настройки. Связь с Telegram бот проверит при запуске; прокси можно поменять в меню (пункт 3)")
+            print(f"  🔑 Когда бот заработает, напишите ему: {B}/login {t['password']}{R} — станете владельцем")
+            return
         if ask_yes("Ввести другой токен?", True):
             token = ask_secret("Токен бота", v_tg_token)
             if token:
@@ -335,9 +352,7 @@ def _step_telegram(cfg: Config, n: int):
         return
     t["token"] = token
     bot = me["result"]["username"]
-    ok(f"Бот на связи: {B}@{bot}{R}")
-    if not t.get("password"):
-        t["password"] = rand_password()
+    ok(f"Бот на связи: {B}@{bot}{R}" + (f" {D}через прокси {proxy_label(proxy)}{R}" if proxy else ""))
     owners = [u for u in t.get("users", []) if u.get("role") == "owner"]
     if owners:
         info(f"Владелец уже назначен (ID {owners[0]['id']})")
@@ -445,7 +460,7 @@ def proxy_dialog(cfg: Config):
                                     ("Выключить прокси" if cfg.get("telegram.proxy.enabled") else "Включить прокси", ""),
                                     ("Назад", "")], default=5)
         if c == 1:
-            p = _ask_proxy("для Telegram", "https://api.telegram.org")
+            p, _ = _ask_proxy("для Telegram", "https://api.telegram.org")
             if p:
                 cfg.set("telegram.proxy.list", lst + [p])
                 cfg.set("telegram.proxy.enabled", True)

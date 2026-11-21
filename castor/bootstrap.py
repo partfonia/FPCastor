@@ -160,8 +160,16 @@ def playerok_status() -> tuple:
         return False, f"не установились {', '.join(failed)}: {last_error}"
     try:
         importlib.invalidate_caches()
+        import logging
+        for name in ("TLSLibrary", "tls_requests", "curl_cffi"):
+            logging.getLogger(name).setLevel(logging.WARNING)
         importlib.import_module("playerokapi.account")
         importlib.import_module("playerokapi.listener.listener")
+        for name in ("TLSLibrary", "tls_requests", "curl_cffi"):  # библиотека могла добавить свой вывод при импорте
+            lg = logging.getLogger(name)
+            lg.setLevel(logging.WARNING)
+            for h in list(lg.handlers):
+                lg.removeHandler(h)
     except Exception as e:
         _log(f"import playerokapi: {e!r}")
         return False, f"библиотека Playerok не загрузилась: {e}"

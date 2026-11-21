@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 import time
 
-from .core import Config, check_proxy, log, normalize_proxy, proxy_label
+from .core import Config, check_proxy, diagnose_proxy, log, normalize_proxy, proxy_label
 
 
 class ProxyManager:
@@ -22,9 +22,15 @@ class ProxyManager:
         return [p for p in self.cfg.get("telegram.proxy.list", []) if str(p).strip()]
 
     def test(self, p: str) -> tuple:
-        ok, info = check_proxy(p)
-        self.results[p] = {"ok": ok, "info": info, "t": time.time()}
+        d = diagnose_proxy(p)
+        ok, info = (True, d["ms"]) if d["ok"] else (False, d["reason"])
+        self.results[p] = {"ok": ok, "info": info, "t": time.time(), "variant": d.get("proxy") if d["ok"] else ""}
         return ok, info
+
+    def _use(self, p: str) -> str:
+        """Подставляет тот тип подключения (socks5h/socks5/http), который сработал при проверке."""
+        r = self.results.get(p) or {}
+        return r.get("variant") or p
 
     def test_all(self) -> list:
         out = []
@@ -65,7 +71,7 @@ class ProxyManager:
     def apihelper_value(self):
         if not self.current:
             return None
-        n = normalize_proxy(self.current)
+        n = normalize_proxy(self._use(self.current))
         return {"https": n, "http": n}
 
     def label(self) -> str:

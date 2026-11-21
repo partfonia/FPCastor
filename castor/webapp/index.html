@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>FunPay &amp; Playerok Castor</title>
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="login" hidden>
+  <form class="login" onsubmit="pwLogin(event)">
+    <img src="logo.svg" alt="" width="56" height="56" style="border-radius:16px">
+    <h1>FunPay &amp; Playerok Castor</h1>
+    <p class="hint" id="lhint">Войдите паролем веб-панели. В Telegram вход автоматический, если вы в команде бота.</p>
+    <label for="pw">Пароль</label>
+    <input id="pw" type="password" autocomplete="current-password" required>
+    <button class="btn wide" type="submit">Войти</button>
+    <p class="err" id="lerr" role="alert"></p>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header class="duo" id="duo"></header>
+  <main id="view" tabindex="-1"></main>
+  <div class="savebar" id="savebar" hidden>
+    <span>Есть несохранённые изменения</span>
+    <button class="btn" onclick="saveCfg()">Сохранить</button>
+  </div>
+  <nav class="tabs" id="tabs" aria-label="Разделы">
+    <button data-tab="home"><svg viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Главная</button>
+    <button data-tab="chats"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z"/></svg>Чаты</button>
+    <button data-tab="sales"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Продажи</button>
+    <button data-tab="goods"><svg viewBox="0 0 24 24"><path d="M3 7l9-4 9 4-9 4zM3 7v10l9 4 9-4V7M12 11v10"/></svg>Выдача</button>
+    <button data-tab="more"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>Ещё</button>
+  </nav>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<dialog id="dlg"><form method="dialog" id="dlgform"></form></dialog>
+<script src="app.js"></script>
+</body>
+</html>

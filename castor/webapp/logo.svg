@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="FunPay &amp; Playerok Castor">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2F7BE0"/><stop offset="1" stop-color="#16A35A"/>
+    </linearGradient>
+    <radialGradient id="bg" cx="50%" cy="38%" r="75%">
+      <stop offset="0" stop-color="#18233a"/><stop offset="1" stop-color="#0b111c"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="120" fill="url(#bg)"/>
+  <g fill="none" stroke-linecap="round" stroke-width="36">
+    <path d="M140 156 Q256 206 372 156" stroke="url(#g)"/>
+    <path d="M140 356 Q256 306 372 356" stroke="url(#g)"/>
+    <path d="M206 186 V326" stroke="#2F7BE0"/>
+    <path d="M306 186 V326" stroke="#16A35A"/>
+  </g>
+</svg>

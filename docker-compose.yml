@@ -1,0 +1,10 @@
+services:
+  fpcastor:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./castor_data:/app/castor_data
+      - ./plugins:/app/plugins
+      - ./storage:/app/storage

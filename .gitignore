@@ -1,0 +1,9 @@
+castor_data/
+gemini_data/
+duo_data/
+storage/
+configs/
+venv/
+__pycache__/
+*.pyc
+.env

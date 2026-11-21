@@ -93,7 +93,7 @@ async function saveCfg() {
 function bindTabs() {
   document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => { stack.length = 0; go(b.dataset.tab); });
 }
-const TABS = {home, chats, sales, goods, more};
+const TABS = {home, chats, sales, goods, more};  // goods открывается из «Настроек»
 function go(tab) {
   TAB = tab;
   document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
@@ -172,34 +172,28 @@ async function refreshDuo() {
 }
 function plural(n, a, b, c) { n = Math.abs(n) % 100; const n1 = n % 10; return n > 10 && n < 20 ? c : n1 > 1 && n1 < 5 ? b : n1 === 1 ? a : c; }
 
-/* ───────── главная ───────── */
+/* ───────── главная: только главное ───────── */
 async function home() {
   view(`<div class="empty">Загружаю…</div>`);
   await refreshDuo();
-  const s = STATUS, st = s.stats, fin = can("finance");
+  const s = STATUS, fin = can("finance"), set = can("settings");
   const ev = can("chat") ? await api("events") : {events: []};
   const warn = [];
-  const goMore = (fn, arg = "") => `TAB='more';go('more');push(${fn}${arg ? ",'" + arg + "'" : ""})`;
-  if (can("settings") && !s.accounts.length) warn.push(link("⚠️", "Добавьте аккаунт площадки", "golden_key FunPay или token Playerok", goMore("accountsView", "funpay")));
-  s.accounts.filter(a => a.running && !a.ok && a.error).forEach(a => warn.push(link(a.platform === "funpay" ? "🔵" : "🟢", H(a.name) + ": ошибка", H(a.error), can("settings") ? goMore("accountView", a.id) : "")));
-  if (s.telegram.error && can("system")) warn.push(link("🤖", "Telegram: нет связи", H(s.telegram.error), goMore("botView")));
-  if (s.supplier_pending && can("delivery")) warn.push(link("🏭", "Заказы ждут проверки у поставщика", "связь оборвалась во время покупки — проверьте вручную", goMore("suppliersView")));
-  Object.entries(s.withdraw || {}).forEach(([p, w]) => { if (w.paused && can("withdraw")) warn.push(link("⏸", `Автовывод ${PN[p]} на паузе`, H(w.paused), goMore("withdrawView"))); });
+  const goSet = (fn, arg = "") => `TAB='more';go('more');push(${fn}${arg ? ",'" + arg + "'" : ""})`;
+  if (set && !s.accounts.length) warn.push(link("⚠️", "Добавьте аккаунт", "golden_key FunPay или token Playerok", goSet("accountsView", "funpay")));
+  s.accounts.filter(a => a.running && !a.ok && a.error).forEach(a => warn.push(link("⚠️", H(a.name) + ": нет связи", H(a.error), set ? goSet("accountView", a.id) : "")));
+  if (s.supplier_pending && can("delivery")) warn.push(link("🏭", "Заказы ждут проверки у поставщика", "проверьте вручную", goSet("suppliersView")));
+  Object.entries(s.withdraw || {}).forEach(([p, w]) => { if (w.paused && can("withdraw")) warn.push(link("⏸", `Автовывод ${PN[p]} на паузе`, H(w.paused), goSet("withdrawView"))); });
+  const quick = set ? `<h3>Быстро</h3><div class="group">
+      ${tog("features.vacation.enabled", "🏖 Режим отпуска", "бот сам ответит, что вы не на связи", "act('vacation').then(home)")}
+      ${link("⬆️", "Поднять лоты FunPay", "", "act('raise')")}
+      ${link("⚙️", "Все переключатели", "автовыдача, автоответ, приветствие…", goSet("switchesView"))}</div>` : "";
   view(`
-    ${warn.length ? `<div class="group">${warn.join("")}</div>` : ""}
-    ${fin ? chart(st.daily) : ""}
-    <div class="actions">
-      ${can("settings") ? `<button class="btn ghost" onclick="act('raise')">⬆️ Поднять лоты</button>
-      <button class="btn ghost" onclick="act('vacation').then(home)">🏖 Отпуск: ${s.vacation ? "вкл" : "выкл"}</button>` : ""}
-      ${fin ? `<button class="btn ghost" onclick="TAB='more';go('more');push(financeView)">📈 Финансы</button><button class="btn ghost" onclick="act('report')">🌙 Отчёт в Telegram</button>` : ""}
-    </div>
-    ${fin ? `<h3>За период</h3><div class="group">
-      ${[["week", "7 дней"], ["month", "30 дней"], ["all", "Всё время"]].map(([k, n]) => `<div class="item"><div class="tx"><b>${n}</b>
-        <span>выручка ${money(st[k].total.sum)} · ${st[k].total.count} ${plural(st[k].total.count, "заказ", "заказа", "заказов")}${st[k].total.expenses ? " · расходы " + money(st[k].total.expenses) : ""}</span></div>
-        <span class="val num">${money(st[k].total.profit)}</span></div>`).join("")}
-      <div class="item"><div class="tx"><b>Автовыдач</b><span>поднятий лотов: ${st.raises} · возвратов: ${st.refunds}</span></div><span class="val num">${st.deliveries}</span></div></div>` : ""}
-    ${can("chat") ? `<h3>Последние события</h3>
-    <div class="group">${ev.events.slice(0, 20).map(evRow).join("") || `<div class="empty"><b>Пока тихо</b>Здесь появятся сообщения и заказы со всех аккаунтов.</div>`}</div>` : ""}`);
+    ${warn.length ? `<h3>Нужно внимание</h3><div class="group">${warn.join("")}</div>` : ""}
+    ${quick}
+    ${can("chat") ? `<h3>Последнее</h3>
+    <div class="group">${ev.events.slice(0, 8).map(evRow).join("") || `<div class="empty"><b>Пока тихо</b>Здесь появятся сообщения и заказы.</div>`}</div>` : ""}
+    ${fin ? `<div class="actions" style="margin-top:12px"><button class="btn ghost" onclick="${goSet("financeView")}">📊 Статистика и прибыль</button></div>` : ""}`);
 }
 function evRow(e) {
   const p = `<span class="pf ${e.platform}">${e.platform === "funpay" ? "FP" : "PL"}</span>`;
@@ -382,38 +376,78 @@ async function saveProducts(f) {
 }
 /* ───────── ещё ───────── */
 function more() {
-  const pc = CFG.telegram ? CFG.telegram.proxy : {enabled: false};
-  const g = (h, items) => { const x = items.filter(Boolean); return x.length ? `<h3>${h}</h3><div class="group">${x.join("")}</div>` : ""; };
-  const accN = p => (CFG.accounts && CFG.accounts[p] || []).length;
-  const wmOn = CFG.general && CFG.general.watermark_enabled !== false;
-  view(`<p class="hint" style="margin:0 6px 4px">Вы вошли как <b>${H(ME.role_name)}</b>${ME.role === "manager" ? ". Вам доступны чаты, заказы без сумм, пополнение товаров и заметки о покупателях. Настройки меняют владелец и администратор." : ""}</p>` +
-    g("Площадки и аккаунты", [
-      can("settings") && link("🔵", "FunPay", `${accN("funpay")} ${plural(accN("funpay"), "аккаунт", "аккаунта", "аккаунтов")} · ${CFG.funpay.enabled ? "вкл" : "выкл"}`, "push(accountsView,'funpay')"),
-      can("settings") && link("🟢", "Playerok", `${accN("playerok")} ${plural(accN("playerok"), "аккаунт", "аккаунта", "аккаунтов")} · ${CFG.playerok.enabled ? "вкл" : "выкл"}`, "push(accountsView,'playerok')")]) +
-    g("Деньги", [
-      can("finance") && link("📈", "Финансы и прибыль", "выручка, себестоимость, комиссии, расходы", "push(financeView)"),
-      can("withdraw") && link("💸", "Автовывод средств", ["funpay", "playerok"].map(p => PN[p] + ": " + ({off: "выкл", ask: "спрашивать", auto: "авто"})[CFG.withdraw[p].mode]).join(" · "), "push(withdrawView)")]) +
-    g("Общение с покупателями", [
-      can("settings") && link("✍️", "Подпись в чатах", wmOn ? H(CFG.general.watermark || (ME.app && ME.app.default_watermark)) : "выключена", "push(watermarkView)"),
-      can("settings") && link("🤖", "Автоответы на команды", `${CFG.commands.length} ${plural(CFG.commands.length, "команда", "команды", "команд")}`, "push(commandsView)"),
-      can("settings") && link("📝", "Шаблоны быстрых ответов", `${CFG.templates.length} шт`, "push(templatesView)"),
-      can("settings") && link("🕘", "Рабочее время и отпуск", CFG.features.vacation.enabled ? "сейчас в отпуске" : CFG.general.work_hours.enabled ? CFG.general.work_hours.from + "–" + CFG.general.work_hours.to : "круглосуточно", "push(scheduleView)"),
-      can("settings") && link("🚫", "Чёрный список", `${CFG.blacklist.users.length}`, "push(blacklistView)")]) +
-    g("Автоматизация", [
-      can("delivery") && can("settings") && link("🏭", "Поставщики (API)", `${(CFG.suppliers || []).length} подключено`, "push(suppliersView)"),
-      can("settings") && link("✨", "Функции", "лоты без товара, напоминания, отчёты, антифлуд, вебхуки", "push(featuresView)"),
-      can("plugins") && link("🧩", "Плагины", "Cardinal, Castor, Playerok Universal", "push(pluginsView)")]) +
-    g("Telegram и команда", [
-      can("system") && link("🤖", "Бот и прокси", `${STATUS && STATUS.telegram.username ? "@" + H(STATUS.telegram.username) : "бот не подключён"} · ${pc.enabled ? "прокси вкл" : "без прокси"}`, "push(botView)"),
-      can("settings") && link("🔔", "Уведомления", "что присылать в Telegram", "push(notifyView)"),
-      can("users") && link("👨‍💼", "Команда и роли", "владельцы, администраторы, менеджеры", "push(teamView)"),
-      can("system") && link("🔐", "Доступ и веб-панель", "пароли, адрес мини-аппа, туннель", "push(accessView)")]) +
-    g("Система", [
-      can("secrets") && link("💾", "Бекапы", "конфиг, товары, статистика, плагины", "push(backupsView)"),
-      can("system") && link("📜", "Логи", "", "push(logsView)"),
-      can("secrets") && link("🧾", "Весь конфиг (JSON)", "для опытных", "push(jsonView)"),
-      can("system") && `<button class="item" onclick="confirmBox('Перезапустить бота?').then(ok=>ok&&act('restart').then(()=>setTimeout(()=>location.reload(),6000)))"><span class="ic">🔄</span><span class="tx"><b>Перезапустить бота</b><span>${STATUS ? "v" + STATUS.version + " · работает " + STATUS.uptime : ""}</span></span></button>`]) +
-    g("Проект", [link(`<img src="logo.svg" alt="" width="30" height="30" style="border-radius:9px">`, "О боте", `${H((ME.app || {}).name || "")} v${H((ME.app || {}).version || "")}`, "push(aboutView)")]));
+  const g = items => { const x = items.filter(Boolean); return x.length ? `<div class="group">${x.join("")}</div>` : ""; };
+  const on = v => v ? "вкл" : "выкл";
+  const both = k => `FunPay ${on(getPath("funpay." + k))} · Playerok ${on(getPath("playerok." + k))}`;
+  const set = can("settings");
+  view(`${title("Настройки")}` +
+    g([
+      set && link("⚙️", "Глобальные переключатели", "всё вкл/выкл на одном экране", "push(switchesView)"),
+      set && link("🔔", "Уведомления", "что присылать в Telegram", "push(notifyView)"),
+      set && link("🤖", "Автоответчик", `${CFG.commands.length} ${plural(CFG.commands.length, "команда", "команды", "команд")} · ${both("auto_reply")}`, "push(commandsView)"),
+      can("products") && link("📦", "Автовыдача", "правила и файлы с товаром", "TAB='more';push(goods)"),
+      set && link("👋", "Приветствие", both("greeting.enabled"), "push(greetView)"),
+      set && link("✅", "Ответ на подтверждение", both("confirm_reply.enabled"), "push(confirmView)"),
+      set && link("⭐", "Ответ на отзывы", "FunPay · " + on(getPath("funpay.review_reply.enabled")), "push(reviewsView)"),
+      can("finance") && link("📊", "Статистика и прибыль", "выручка, себестоимость, расходы", "push(financeView)")]) +
+    g([
+      set && link("👤", "Аккаунты FunPay", `${(CFG.accounts.funpay || []).length} шт`, "push(accountsView,'funpay')"),
+      set && link("👤", "Аккаунты Playerok", `${(CFG.accounts.playerok || []).length} шт`, "push(accountsView,'playerok')"),
+      can("withdraw") && link("💸", "Автовывод средств", ["funpay", "playerok"].map(p => PN[p] + ": " + ({off: "выкл", ask: "спрашивать", auto: "авто"})[CFG.withdraw[p].mode]).join(" · "), "push(withdrawView)"),
+      set && link("🏷", "Лоты без товара", "скрывать, спрашивать или сообщать", "push(featuresView)"),
+      set && link("📝", "Шаблоны ответов", `${CFG.templates.length} шт`, "push(templatesView)"),
+      set && link("🚫", "Чёрный список", `${CFG.blacklist.users.length} чел.`, "push(blacklistView)"),
+      set && link("🕘", "Рабочие часы и отпуск", CFG.features.vacation.enabled ? "сейчас отпуск" : CFG.general.work_hours.enabled ? CFG.general.work_hours.from + "–" + CFG.general.work_hours.to : "круглосуточно", "push(scheduleView)"),
+      set && link("✍️", "Подпись в чатах", on(CFG.general.watermark_enabled !== false), "push(watermarkView)")]) +
+    g([
+      can("system") && link("🌐", "Бот и прокси", STATUS && STATUS.telegram.username ? "@" + H(STATUS.telegram.username) : "", "push(botView)"),
+      can("system") && link("📱", "Доступ к панели", "пароль, адрес", "push(accessView)"),
+      can("users") && link("👨‍💼", "Команда", "помощники и их права", "push(teamView)"),
+      can("plugins") && link("🧩", "Плагины", "", "push(pluginsView)"),
+      can("delivery") && set && link("🏭", "Поставщики (API)", `${(CFG.suppliers || []).length} шт`, "push(suppliersView)")]) +
+    g([
+      can("secrets") && link("💾", "Бекапы", "", "push(backupsView)"),
+      can("system") && link("🗳", "Логи", "", "push(logsView)"),
+      can("system") && `<button class="item" onclick="confirmBox('Перезапустить бота?').then(ok=>ok&&act('restart').then(()=>setTimeout(()=>location.reload(),6000)))"><span class="ic">🔄</span><span class="tx"><b>Перезапуск</b><span>${STATUS ? "v" + STATUS.version + " · работает " + STATUS.uptime : ""}</span></span></button>`,
+      link("ℹ️", "О боте", `${H((ME.app || {}).name || "")} v${H((ME.app || {}).version || "")}`, "push(aboutView)")]) +
+    `<p class="hint" style="margin:10px 6px">Вы вошли как <b>${H(ME.role_name)}</b>.</p>`);
+}
+/* Глобальные переключатели: строка — функция, справа FunPay и Playerok */
+function switchesView() {
+  const row = (label, a, b) => `<div class="item sw2"><div class="tx"><b>${label}</b></div>
+    ${a ? `<span class="pfx fp">FP</span>${sw(a)}` : `<span class="sw-none"></span>`}${b ? `<span class="pfx pl">PL</span>${sw(b)}` : `<span class="sw-none"></span>`}</div>`;
+  const r2 = (label, k) => row(label, "funpay." + k, "playerok." + k);
+  view(`${title("Глобальные переключатели")}<p class="hint" style="margin:0 6px 10px">FP — FunPay, PL — Playerok. Не забудьте сохранить.</p>
+    <div class="group">
+      ${r2("Площадка работает", "enabled")}${r2("Автовыдача", "auto_delivery")}${r2("Автоответчик", "auto_reply")}
+      ${r2("Приветствие", "greeting.enabled")}${r2("Ответ на подтверждение", "confirm_reply.enabled")}${r2("Текст при заказе", "order_text.enabled")}
+      ${row("Автоподнятие лотов", "funpay.auto_raise.enabled", "")}${row("Ответ на отзывы", "funpay.review_reply.enabled", "")}
+      ${row("Автовозврат без товара", "funpay.auto_refund_no_stock", "")}${row("Отмечать «отправлено»", "", "playerok.mark_sent")}</div>
+    <div class="group" style="margin-top:12px">
+      ${tog("features.vacation.enabled", "Режим отпуска")}${tog("general.work_hours.enabled", "Нерабочее время")}
+      ${tog("general.watermark_enabled", "Подпись в чатах")}</div>`);
+}
+function greetView() {
+  view(`${title("Приветствие")}<p class="hint" style="margin:0 6px 10px">Первое сообщение новому покупателю.</p>
+    <h3>FunPay</h3><div class="group">${tog("funpay.greeting.enabled", "Включено")}${fld("funpay.greeting.text", "Текст", "area")}</div>
+    <h3>Playerok</h3><div class="group">${tog("playerok.greeting.enabled", "Включено")}${fld("playerok.greeting.text", "Текст", "area")}</div>
+    <h3>Постоянным покупателям</h3><div class="group">${tog("features.returning_buyer.enabled", "Другой текст постоянным")}${fld("features.returning_buyer.text", "Текст", "area", "$orders_count — какой это заказ по счёту")}</div>
+    <div class="group" style="margin-top:12px">${fld("funpay.greeting.cooldown_days", "Здороваться снова через, дней", "number")}</div>
+    <p class="hint" style="margin:8px 6px">${VARS}</p>`);
+}
+function confirmView() {
+  view(`${title("Ответ на подтверждение")}<p class="hint" style="margin:0 6px 10px">Сообщение, когда покупатель подтвердил заказ.</p>
+    <h3>FunPay</h3><div class="group">${tog("funpay.confirm_reply.enabled", "Включено")}${fld("funpay.confirm_reply.text", "Текст", "area")}</div>
+    <h3>Playerok</h3><div class="group">${tog("playerok.confirm_reply.enabled", "Включено")}${fld("playerok.confirm_reply.text", "Текст", "area")}</div>
+    <h3>Напоминание подтвердить</h3><div class="group">${tog("features.confirm_reminder.enabled", "Напоминать")}
+      ${fld("features.confirm_reminder.after_hours", "Через сколько часов", "number")}${fld("features.confirm_reminder.text", "Текст", "area")}</div>
+    <p class="hint" style="margin:8px 6px">${VARS}</p>`);
+}
+function reviewsView() {
+  view(`${title("Ответ на отзывы")}<p class="hint" style="margin:0 6px 10px">FunPay: свой текст на каждую оценку.</p>
+    <div class="group">${tog("funpay.review_reply.enabled", "Отвечать на отзывы")}
+      ${[5, 4, 3, 2, 1].map(n => fld("funpay.review_reply.texts." + n, "⭐".repeat(n), "area")).join("")}</div>
+    <p class="hint" style="margin:8px 6px">${VARS}</p>`);
 }
 function platformView(p) {
   const fp = p === "funpay";

@@ -100,7 +100,7 @@ class Module:
 class ModuleManager:
     def __init__(self, app: "App"):
         self.app = app
-        from .rent import RentModule
+        from .rent import RENTALS, migrate_old_rent
         from .mailcode import MailCodeModule
         from .overdue import OverdueModule
         from .autoprice import AutoPriceModule
@@ -108,7 +108,8 @@ class ModuleManager:
         from .lotschedule import LotScheduleModule
         self.modules: dict = {}
         from .extra import ALL as EXTRA
-        for cls in (RentModule, MailCodeModule, OverdueModule, AutoPriceModule, CopyLotsModule, LotScheduleModule, *EXTRA):
+        migrate_old_rent(app)
+        for cls in (*RENTALS, MailCodeModule, OverdueModule, AutoPriceModule, CopyLotsModule, LotScheduleModule, *EXTRA):
             try:
                 self.modules[cls.KEY] = cls(app)
             except Exception as e:  # модуль не должен ронять бота

@@ -305,6 +305,18 @@ def run_shop(cfg):
         except Exception:
             pass
 
+    @bot.message_handler(commands=["grantall"], func=owner_only)
+    def cmd_grantall(m):
+        p = (m.text or "").split()
+        if len(p) < 2:
+            return bot.reply_to(m, "/grantall TG_ID [ДНЕЙ] — выдать ключи на все плагины (без дней — навсегда)")
+        days = float(p[2]) if len(p) > 2 else 0
+        lines = []
+        for pid, prod in P.items():
+            key, exp = grant(int(p[1]), pid, days, note="grantall")
+            lines.append(f"{prod['name']}: <code>{key}</code> до {fmt_exp(exp)}")
+        bot.reply_to(m, "\n".join(lines) or "В config.json нет товаров")
+
     @bot.message_handler(commands=["keys"], func=owner_only)
     def cmd_keys(m):
         p = (m.text or "").split()

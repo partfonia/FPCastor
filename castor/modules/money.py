@@ -18,7 +18,7 @@ def _rub(v) -> str:
 class GoalsModule(Module):
     KEY = "goals"
     GROUP = "Деньги"
-    NAME = "Цели продаж"
+    NAME = "Goals"
     ICON = "🎯"
     DESCRIPTION = "Ставите цель выручки на день и на месяц — бот показывает прогресс и поздравляет, когда цель взята."
     DEFAULTS = {"day": 3000, "month": 60000, "by_profit": False}
@@ -59,7 +59,7 @@ class GoalsModule(Module):
 class ExportModule(Module):
     KEY = "export"
     GROUP = "Деньги"
-    NAME = "Выгрузка в Excel"
+    NAME = "ExportCSV"
     ICON = "📤"
     DESCRIPTION = "Раз в день присылает файл со всеми заказами, выручкой и прибылью — открывается в Excel и Google Таблицах."
     DEFAULTS = {"time": "23:58", "days": 30, "daily": True}
@@ -118,7 +118,7 @@ class ExportModule(Module):
 class ReceiptsModule(Module):
     KEY = "receipts"
     GROUP = "Деньги"
-    NAME = "Чеки «Мой налог»"
+    NAME = "MyTax"
     ICON = "🧾"
     DESCRIPTION = ("Для самозанятых: напоминает пробить чек по каждой подтверждённой продаже — с суммой и названием, "
                    "кнопкой «Чек пробит». Сам чеки не пробивает: это делается в приложении «Мой налог».")
@@ -193,7 +193,7 @@ class ReceiptsModule(Module):
 class TgBackupModule(Module):
     KEY = "tgbackup"
     GROUP = "Безопасность"
-    NAME = "Бекап в Telegram"
+    NAME = "AutoBackup"
     ICON = "💾"
     DESCRIPTION = ("Раз в день присылает владельцу архив с настройками, товарами и статистикой. Компьютер сломался — "
                    "восстановите всё из этого файла. В архиве ваши ключи: никому его не пересылайте.")
@@ -238,7 +238,7 @@ class RiskModule(Module):
     KEY = "risk"
     GROUP = "Безопасность"
     ORDER = 1
-    NAME = "Проверка покупателя"
+    NAME = "BuyerCheck"
     ICON = "🕵️"
     DESCRIPTION = ("Первый заказ от нового покупателя на крупную сумму — частый сценарий обмана. Бот предупредит вас "
                    "и, если нужно, придержит выдачу до вашего «Выдать».")

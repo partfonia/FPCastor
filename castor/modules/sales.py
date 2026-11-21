@@ -13,7 +13,7 @@ from . import Module, continue_order, order_from_dict, order_to_dict
 class AutoRestoreModule(Module):
     KEY = "autorestore"
     GROUP = "Лоты и цены"
-    NAME = "Автовосстановление лотов"
+    NAME = "AutoRestore"
     ICON = "♻️"
     DESCRIPTION = ("FunPay сам выключает лот, когда он продан или кончилось количество. Бот включает его обратно — "
                    "кроме лотов, которые скрыты из-за пустого товара или по расписанию.")
@@ -92,7 +92,7 @@ class PreorderModule(Module):
     KEY = "preorder"
     GROUP = "Выдача"
     ORDER = 60
-    NAME = "Предзаказ"
+    NAME = "PreOrder"
     ICON = "⏳"
     DESCRIPTION = ("Товар закончился, а заказ пришёл — бот не делает возврат, а ставит покупателя в очередь "
                    "и выдаёт сам, как только вы пополните файл.")
@@ -154,7 +154,7 @@ class StepsModule(Module):
     KEY = "steps"
     GROUP = "Выдача"
     ORDER = 20
-    NAME = "Выдача по шагам"
+    NAME = "OrderForm"
     ICON = "🪜"
     DESCRIPTION = ("Сначала спросить у покупателя нужные данные (ник, ID, ссылку, почту), проверить формат — "
                    "и только потом выдать товар или позвать вас.")
@@ -266,7 +266,7 @@ class BundlesModule(Module):
     KEY = "bundles"
     GROUP = "Выдача"
     ORDER = 40
-    NAME = "Наборы"
+    NAME = "Bundles"
     ICON = "🎁"
     DESCRIPTION = "Один заказ — несколько товаров из разных файлов (например, ключ + бонус)."
     DEFAULTS = {"rules": []}
@@ -323,7 +323,7 @@ class LoyaltyModule(Module):
     KEY = "loyalty"
     GROUP = "Общение"
     ORDER = 5
-    NAME = "Бонус постоянным"
+    NAME = "Loyalty"
     ICON = "💎"
     DESCRIPTION = "После каждой N-й покупки отправляет покупателю промокод или подарок — люди возвращаются."
     DEFAULTS = {"every": 5, "text": "Спасибо, что вы с нами! Это ваш $orders_count-й заказ 🎉 Промокод на скидку: $code",

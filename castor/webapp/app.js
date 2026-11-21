@@ -499,7 +499,7 @@ async function setLic(id) {
 let MODS = [];
 async function modulesView() {
   const j = await api("modules"); MODS = j.modules || [];
-  const groups = ["Выдача", "Перепродажа", "Общение", "Лоты и цены", "Заказы", "Деньги", "Безопасность", "Прочее"];
+  const groups = ["Аренда", "Выдача", "Перепродажа", "Общение", "Лоты и цены", "Заказы", "Деньги", "Безопасность", "Прочее"];
   [...new Set(MODS.map(m => m.group))].forEach(g => { if (!groups.includes(g)) groups.push(g); });
   const on = MODS.filter(m => getPath("modules." + m.key + ".enabled")).length;
   view(`${title("Модули")}<p class="hint" style="margin:0 6px 10px">Дополнительные функции бота. Включено ${on} из ${MODS.length}.</p>

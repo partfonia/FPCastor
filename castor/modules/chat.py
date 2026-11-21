@@ -34,7 +34,7 @@ class TranslateModule(Module):
     KEY = "translate"
     GROUP = "Общение"
     ORDER = 3
-    NAME = "Перевод сообщений"
+    NAME = "AutoTranslate"
     ICON = "🌐"
     DESCRIPTION = ("Покупатель пишет не по-русски — бот присылает вам перевод. Ваши ответы из Telegram и панели "
                    "переводит на язык покупателя.")
@@ -103,7 +103,7 @@ class AntiSpamModule(Module):
     KEY = "antispam"
     GROUP = "Общение"
     ORDER = 2
-    NAME = "Антиспам и защита"
+    NAME = "AntiScam"
     ICON = "🛡"
     DESCRIPTION = ("Предупреждает, когда покупатель зовёт в Telegram, просит оплату на карту, кидает ссылки или телефон "
                    "(за такое FunPay может забанить и вас). Глушит автоответы флудерам.")
@@ -168,7 +168,7 @@ class SurveyModule(Module):
     KEY = "survey"
     GROUP = "Общение"
     ORDER = 10
-    NAME = "Опрос после покупки"
+    NAME = "Feedback"
     ICON = "📝"
     DESCRIPTION = ("Через несколько часов после выдачи спрашивает «как всё прошло, оцените от 1 до 5». Довольных просит "
                    "оставить отзыв, недовольных — сразу передаёт вам, пока они не написали плохой отзыв.")

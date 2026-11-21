@@ -28,7 +28,7 @@ class SmmModule(Module):
     KEY = "smm"
     GROUP = "Перепродажа"
     ORDER = 25
-    NAME = "Накрутка через SMM-панель"
+    NAME = "AutoSMM"
     ICON = "📈"
     DESCRIPTION = ("Продаёте подписчиков, лайки, просмотры? Бот спросит у покупателя ссылку, сам закажет услугу в вашей "
                    "SMM-панели (стандартный API v2), проследит за выполнением и напишет покупателю, когда готово.")
@@ -176,10 +176,11 @@ class SmmModule(Module):
 
 # ═════════════════════ LZT Market ═════════════════════
 class LztModule(Module):
+    CATEGORY = "steam"
     KEY = "lzt"
     GROUP = "Перепродажа"
     ORDER = 26
-    NAME = "Аккаунты с LZT Market"
+    NAME = "Lolz Market"
     ICON = "🛒"
     DESCRIPTION = ("Покупатель оплатил лот — бот сам находит самый дешёвый подходящий аккаунт на LZT Market (Steam, TikTok, "
                    "Telegram, ИИ-сервисы и другие разделы), покупает его и отправляет данные покупателю.")
@@ -255,7 +256,7 @@ class LztModule(Module):
         try:
             q = str(r.get("query") or "").lstrip("?")
             maxp = float(r.get("max_price") or 0)
-            path = f"/{str(r.get('category') or 'steam').strip('/')}?order_by=price_to_up" + (f"&pmax={maxp:g}" if maxp else "") + \
+            path = f"/{str(r.get('category') or self.CATEGORY).strip('/')}?order_by=price_to_up" + (f"&pmax={maxp:g}" if maxp else "") + \
                 (f"&{q}" if q else "")
             items = (self._req("GET", path).get("items") or [])[:need + 6]
             for it in items:
@@ -305,3 +306,31 @@ class LztModule(Module):
             except Exception as e:
                 return f"Ошибка: {e}"
         return "Нет такого действия"
+
+
+# ═════════════════════ готовые варианты ═════════════════════
+class SteamSmmModule(SmmModule):
+    KEY = "steamsmm"
+    NAME = "Steam SMM"
+    ICON = "🏅"
+    DESCRIPTION = ("Услуги для Steam через вашу SMM-панель: награды и комментарии в профиле CS2, рекомендации и т.п. "
+                   "Бот спросит ссылку на профиль Steam, закажет и проследит за выполнением.")
+    DEFAULTS = dict(SmmModule.DEFAULTS, text_ask="Пришлите ссылку на ваш профиль Steam (steamcommunity.com/…) 🔗",
+                    text_bad="Нужна ссылка на профиль Steam: https://steamcommunity.com/id/… или /profiles/…")
+
+
+class AutoTTModule(LztModule):
+    KEY = "autott"
+    NAME = "Auto TT"
+    ICON = "🎵"
+    CATEGORY = "tiktok"
+    DESCRIPTION = "Покупает TikTok-аккаунты на LZT Market под оплаченный лот и сразу отдаёт данные покупателю."
+
+
+class AutoAIAccountsModule(LztModule):
+    KEY = "autoai"
+    NAME = "AutoAIAccounts"
+    ICON = "🤖"
+    CATEGORY = "chatgpt"
+    DESCRIPTION = ("Покупает аккаунты ИИ-сервисов (ChatGPT и др.) на LZT Market под оплаченный заказ, выдаёт данные "
+                   "и учитывает прибыль.")

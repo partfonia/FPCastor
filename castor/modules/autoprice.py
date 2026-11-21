@@ -16,7 +16,7 @@ class AutoPriceModule(Module):
     KEY = "autoprice"
     GROUP = "Лоты и цены"
     ORDER = 50
-    NAME = "Автоцена"
+    NAME = "AutoDump"
     ICON = "💹"
     DESCRIPTION = "Подстраивает цену лотов под конкурентов: на шаг дешевле самого дешёвого, но не ниже вашего минимума."
     PLATFORMS = ("funpay",)

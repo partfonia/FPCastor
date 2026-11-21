@@ -1,10 +1,10 @@
-"""Аренда аккаунтов: Steam, Dota 2, Valorant, FACEIT, VIP-серверы Roblox и любые другие.
+"""Аренда аккаунтов — отдельный плагин на каждую игру: RentSteam, Dota 2 Rental, Valorant Rental,
+Faceit Rental, VIP Roblox. Общая основа — RentBase; у каждого плагина свои аккаунты, лоты и тексты.
 
-Покупатель оплатил лот аренды → бот выдаёт свободный аккаунт нужной игры, считает время
-(количество в заказе × часов за единицу), продлевает при повторной покупке, напоминает о конце,
-по команде !guard присылает код Steam Guard, по !время — сколько осталось.
-Когда аренда кончилась — пишет покупателю и вам: «смените пароль», и аккаунт снова в работе
-после нажатия кнопки «Пароль сменён» (или сразу, если так настроено).
+Покупатель оплатил лот аренды → бот выдаёт свободный аккаунт (или ссылку на VIP-сервер), считает время
+(количество в заказе × часов за штуку), продлевает при повторной покупке, напоминает о конце.
+Команды покупателя: !guard — код Steam Guard, !время — сколько осталось, !замена — попросить другой аккаунт,
+!доиграть — (Faceit) добавить время, чтобы закончить матч.
 """
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ import time
 import uuid
 from datetime import datetime
 
-from ..core import esc, fmt_template, log
-from . import Module
+from ..core import esc, fmt_template, load_json, save_json
+from . import MOD_DIR, Module
 
 STEAM_CHARS = "23456789BCDFGHJKMNPQRTVWXY"
 
@@ -44,58 +44,90 @@ def human_left(sec: float) -> str:
     return (f"{d} д " if d else "") + (f"{h} ч " if h or d else "") + f"{m} мин"
 
 
-class RentModule(Module):
-    KEY = "rent"
-    GROUP = "Выдача"
+class RentBase(Module):
+    GROUP = "Аренда"
     ORDER = 30
-    NAME = "Аренда аккаунтов"
-    ICON = "🎮"
-    DESCRIPTION = ("Выдаёт аккаунты в аренду по таймеру: Steam, Dota 2, Valorant, FACEIT, VIP Roblox и любые другие. "
-                   "Продление, напоминания, коды Steam Guard по команде !guard.")
+    GAME = ""
+    GUARD = True               # коды Steam Guard по !guard
+    LINK_MODE = False          # VIP Roblox: выдаётся ссылка, а не логин/пароль
+    EXTRA_TIME = False         # Faceit: !доиграть
     DEFAULTS = {
-        "lots": [],        # [{"keyword": "аренда dota", "game": "dota", "hours_per_unit": 1}]
-        "accounts": [],    # [{"id", "game", "login", "password", "shared_secret", "mailbox", "note", "enabled"}]
-        "guard_command": "!guard|!гуард|!код стим",
+        "lots": [],
+        "accounts": [],
+        "guard_command": "!guard|!гуард",
         "time_command": "!время|!time",
+        "replace_command": "!замена|!replace",
+        "extra_command": "!доиграть",
+        "extra_minutes": 40,
         "remind_before_min": 15,
-        "after_end": "ask",   # ask — ждать вашего «пароль сменён»; free — сразу вернуть в работу
+        "after_end": "ask",
         "text_start": ("Аренда начата ✅\nЛогин: $login\nПароль: $password\nДо: $end ($hours ч)\n\n"
-                       "Код Steam Guard — команда !guard. Сколько осталось — !время.\nНе меняйте данные аккаунта."),
+                       "Сколько осталось — !время. Проблема с аккаунтом — !замена.\nНе меняйте данные аккаунта."),
         "text_extend": "Аренда продлена на $hours ч ✅ Теперь до $end.",
         "text_remind": "⏰ До конца аренды осталось $left. Продлить — оплатите лот ещё раз.",
         "text_end": "Аренда закончилась. Спасибо! Буду рад отзыву ⭐",
         "text_wait": "Все аккаунты сейчас заняты — выдам, как только освободится. Продавец уже в курсе.",
     }
-    FIELDS = [
-        ("lots", "Какие лоты — аренда", "items"),
-        ("accounts", "Аккаунты для аренды", "items"),
+    BASE_FIELDS = [
+        ("lots", "Какие лоты — эта аренда", "items"),
+        ("accounts", "Аккаунты", "items"),
         ("after_end", "Когда аренда кончилась", "select", [["ask", "ждать, пока я сменю пароль"], ["free", "сразу выдавать снова"]]),
         ("remind_before_min", "Напомнить до конца, мин", "number"),
-        ("guard_command", "Команда кода Steam Guard", "text"),
         ("time_command", "Команда «сколько осталось»", "text"),
-        ("text_start", "Сообщение при выдаче", "area", "$login $password $end $hours $game"),
+        ("replace_command", "Команда «замена аккаунта»", "text"),
+        ("text_start", "Сообщение при выдаче", "area", "$login $password $link $end $hours"),
         ("text_extend", "Сообщение при продлении", "area"),
         ("text_remind", "Напоминание о конце", "area", "$left — сколько осталось"),
         ("text_end", "Сообщение в конце", "area"),
         ("text_wait", "Если свободных аккаунтов нет", "area"),
     ]
-    ITEM_FIELDS = {
-        "lots": [("keyword", "Слово в названии лота", "text", "например: аренда dota | rent dota"),
-                 ("game", "Игра (метка аккаунтов)", "text", "steam, dota, valorant…"),
-                 ("hours_per_unit", "Часов за 1 шт. в заказе", "number")],
-        "accounts": [("game", "Игра (метка)", "text"), ("login", "Логин", "text"), ("password", "Пароль", "secret"),
-                     ("shared_secret", "shared_secret Steam Guard", "secret", "из maFile, для кодов !guard"),
-                     ("mailbox", "Почтовый ящик (для кодов)", "text", "имя ящика из модуля «Коды с почты»"),
-                     ("note", "Заметка", "text"), ("enabled", "Используется", "bool")],
-    }
+    LOT_FIELDS = [("keyword", "Слово в названии лота", "text", "например: аренда | rent"),
+                  ("hours_per_unit", "Часов за 1 шт. в заказе", "number")]
+    ACC_FIELDS = [("login", "Логин", "text"), ("password", "Пароль", "secret"),
+                  ("shared_secret", "shared_secret Steam Guard", "secret", "из maFile — для кодов !guard"),
+                  ("note", "Заметка (видна только вам)", "text"), ("enabled", "Используется", "bool")]
+
+    def __init_subclass__(cls, **kw):
+        super().__init_subclass__(**kw)
+        f = list(cls.BASE_FIELDS)
+        if cls.GUARD:
+            f.insert(4, ("guard_command", "Команда кода Steam Guard", "text"))
+        if cls.EXTRA_TIME:
+            f.insert(5, ("extra_command", "Команда «доиграть матч»", "text"))
+            f.insert(6, ("extra_minutes", "Сколько минут добавить, чтобы доиграть", "number"))
+        cls.FIELDS = f
+        cls.ITEM_FIELDS = {"lots": cls.LOT_FIELDS, "accounts": cls.ACC_FIELDS}
 
     def __init__(self, app):
         super().__init__(app)
-        self.data.setdefault("rentals", {})      # id → аренда
-        self.data.setdefault("dirty", [])        # аккаунты, ждущие смены пароля
-        self.data.setdefault("queue", [])        # заказы, ждущие свободный аккаунт
+        self.data.setdefault("rentals", {})
+        self.data.setdefault("dirty", [])
+        self.data.setdefault("queue", [])
+        self.data.setdefault("extra_used", [])
 
-    # ── поиск ──
+    # ── аккаунты ──
+    def _ensure_ids(self):
+        path = f"modules.{self.KEY}.accounts"
+        accs = self.app.cfg.get(path, []) or []
+        if any(not a.get("id") for a in accs):
+            for a in accs:
+                a.setdefault("id", uuid.uuid4().hex[:8])
+            self.app.cfg.set(path, accs)
+
+    def _accounts(self):
+        self._ensure_ids()
+        return [a for a in self.get("accounts", []) if a.get("id") and a.get("enabled", True)]
+
+    def account(self, acc_id):
+        return next((a for a in self.get("accounts", []) if a.get("id") == acc_id), None)
+
+    def _busy_ids(self):
+        return {r["account_id"] for r in self.data["rentals"].values() if not r.get("ended")} | set(self.data["dirty"])
+
+    def _free(self, exclude=()):
+        busy = self._busy_ids() | set(exclude)
+        return [a for a in self._accounts() if a["id"] not in busy]
+
     def _lot(self, title):
         t = (title or "").lower()
         for lot in self.get("lots", []):
@@ -104,53 +136,27 @@ class RentModule(Module):
                 return lot
         return None
 
-    def _accounts(self, game):
-        self._ensure_ids()
-        return [a for a in self.get("accounts", []) if a.get("id") and a.get("enabled", True) and
-                str(a.get("game", "")).lower() == str(game).lower()]
-
-    def _busy_ids(self):
-        busy = {r["account_id"] for r in self.data["rentals"].values() if not r.get("ended")}
-        return busy | set(self.data["dirty"])
-
-    def _active_for(self, platform, buyer, game=None):
+    def active_for(self, platform, buyer):
         for rid, r in self.data["rentals"].items():
-            if r.get("ended") or r["platform"] != platform or str(r["buyer"]).lower() != str(buyer).lower():
-                continue
-            if game is None or str(r["game"]).lower() == str(game).lower():
+            if not r.get("ended") and r["platform"] == platform and str(r["buyer"]).lower() == str(buyer).lower():
                 return rid, r
         return None, None
 
-    def account(self, acc_id):
-        return next((a for a in self.get("accounts", []) if a.get("id") == acc_id or a.get("login") == acc_id), None)
-
-    def _ensure_ids(self):
-        accs = self.app.cfg.get("modules.rent.accounts", []) or []
-        changed = False
-        for a in accs:
-            if not a.get("id"):
-                a["id"] = uuid.uuid4().hex[:8]
-                changed = True
-        if changed:
-            self.app.cfg.set("modules.rent.accounts", accs)
-
     def _vars(self, r, acc, hours=None):
-        return dict(login=acc.get("login", ""), password=acc.get("password", ""), game=r.get("game", ""),
+        return dict(login=acc.get("login", ""), password=acc.get("password", ""), link=acc.get("link", ""),
+                    game=self.GAME, username=r.get("buyer", ""), left=human_left(r["end"] - time.time()),
                     end=datetime.fromtimestamp(r["end"]).strftime("%d.%m %H:%M"),
-                    hours=hours if hours is not None else round((r["end"] - r["start"]) / 3600, 1),
-                    username=r.get("buyer", ""), left=human_left(r["end"] - time.time()))
+                    hours=f"{round(hours if hours is not None else (r['end'] - r['start']) / 3600, 1):g}")
 
     # ── заказ ──
     def on_order(self, o) -> bool:
         lot = self._lot(o.title)
         if not lot:
             return False
-        self._ensure_ids()
         hours = float(lot.get("hours_per_unit") or 1) * max(1, int(o.amount or 1))
-        game = lot.get("game", "")
         with self.lock:
-            rid, r = self._active_for(o.platform, o.buyer, game)
-            if r:  # продление
+            rid, r = self.active_for(o.platform, o.buyer)
+            if r:
                 r["end"] += hours * 3600
                 r["reminded"] = False
                 r["orders"].append(str(o.id))
@@ -158,70 +164,86 @@ class RentModule(Module):
                 acc = self.account(r["account_id"]) or {}
                 o.reply(fmt_template(self.get("text_extend"), **self._vars(r, acc, hours)))
                 self.app.stats.set_order_flag(o.id, "delivered", True, o.platform)
-                self.notify(f"🎮 Аренда продлена: <b>{esc(o.buyer)}</b> +{hours:g} ч · {esc(acc.get('login', ''))}")
+                self.notify(f"{self.ICON} {esc(self.NAME)}: продлено {esc(o.buyer)} +{hours:g} ч")
                 return True
-            free = [a for a in self._accounts(game) if a["id"] not in self._busy_ids()]
+            free = self._free()
             if not free:
                 self.data["queue"].append({"platform": o.platform, "account": o.account, "order_id": str(o.id),
-                                           "chat_id": o.chat_id, "buyer": o.buyer, "game": game, "hours": hours,
-                                           "t": time.time()})
+                                           "chat_id": o.chat_id, "buyer": o.buyer, "hours": hours, "t": time.time()})
                 self.save()
                 o.reply(fmt_template(self.get("text_wait"), username=o.buyer))
-                self.notify(f"🎮 <b>Нет свободных аккаунтов</b> «{esc(game)}» для {esc(o.buyer)} "
-                            f"(заказ <code>{esc(o.id)}</code>). Выдам автоматически, когда освободится.")
+                self.notify(f"{self.ICON} <b>{esc(self.NAME)}: нет свободных аккаунтов</b> для {esc(o.buyer)} "
+                            f"(заказ <code>{esc(o.id)}</code>). Выдам сам, когда освободится.")
                 return True
-            self._start(free[0], o.platform, o.account, str(o.id), o.chat_id, o.buyer, game, hours, reply=o.reply)
+            self._start(free[0], o.platform, o.account, str(o.id), o.chat_id, o.buyer, hours, reply=o.reply)
         return True
 
-    def _start(self, acc, platform, account, order_id, chat_id, buyer, game, hours, reply=None):
+    def _start(self, acc, platform, account, order_id, chat_id, buyer, hours, reply=None):
         now = time.time()
-        rid = uuid.uuid4().hex[:10]
-        r = {"account_id": acc["id"], "platform": platform, "account": account, "chat_id": str(chat_id),
-             "buyer": buyer, "game": game, "start": now, "end": now + hours * 3600, "orders": [order_id],
-             "reminded": False, "ended": False}
-        self.data["rentals"][rid] = r
+        r = {"account_id": acc["id"], "platform": platform, "account": account, "chat_id": str(chat_id), "buyer": buyer,
+             "start": now, "end": now + hours * 3600, "orders": [order_id], "reminded": False, "ended": False}
+        self.data["rentals"][uuid.uuid4().hex[:10]] = r
         self.save()
         text = fmt_template(self.get("text_start"), **self._vars(r, acc, hours))
-        if reply:
-            reply(text)
-        else:
-            self.reply(platform, chat_id, text, account, buyer)
+        (reply or (lambda t: self.reply(platform, chat_id, t, account, buyer)))(text)
         self.app.stats.set_order_flag(order_id, "delivered", True, platform)
-        self.notify(f"🎮 <b>Аренда выдана</b>: {esc(buyer)} · {esc(game)} · {esc(acc.get('login'))} на {hours:g} ч")
+        self.notify(f"{self.ICON} <b>{esc(self.NAME)}</b>: выдано {esc(buyer)} — "
+                    f"{esc(acc.get('login') or acc.get('note') or acc['id'])} на {hours:g} ч")
 
-    # ── сообщения ──
+    # ── команды покупателя ──
     @staticmethod
-    def _is(cmd_list, text):
+    def _is(cmds, text):
         t = (text or "").strip().lower()
-        return any(t == c.strip().lower() for c in str(cmd_list).split("|") if c.strip())
+        return any(t == c.strip().lower() for c in str(cmds).split("|") if c.strip())
 
     def on_message(self, m) -> bool:
-        if self._is(self.get("guard_command"), m.text):
-            rid, r = self._active_for(m.platform, m.author)
-            if not r:
-                self.reply(m.platform, m.chat_id, "У вас нет активной аренды.", m.account, m.chat_name)
-                return True
-            acc = self.account(r["account_id"]) or {}
+        if m.system or m.by_me:
+            return False
+        say = lambda t: self.reply(m.platform, m.chat_id, t, m.account, m.chat_name)  # noqa: E731
+        is_guard = self.GUARD and self._is(self.get("guard_command"), m.text)
+        is_time = self._is(self.get("time_command"), m.text)
+        is_repl = self._is(self.get("replace_command"), m.text)
+        is_extra = self.EXTRA_TIME and self._is(self.get("extra_command"), m.text)
+        if not (is_guard or is_time or is_repl or is_extra):
+            return False
+        rid, r = self.active_for(m.platform, m.author)
+        if not r:
+            # аренда может быть в другом плагине аренды — тогда ответит он
+            others = [x for x in self.app.modules.active() if isinstance(x, RentBase) and x is not self]
+            if any(x.active_for(m.platform, m.author)[1] for x in others):
+                return False
+            say("У вас нет активной аренды.")
+            return True
+        acc = self.account(r["account_id"]) or {}
+        if is_guard:
             if not acc.get("shared_secret"):
-                self.reply(m.platform, m.chat_id, "Для этого аккаунта код не нужен — заходите по логину и паролю.",
-                           m.account, m.chat_name)
+                say("Для этого аккаунта код не нужен — заходите по логину и паролю.")
                 return True
             try:
                 code = steam_guard_code(acc["shared_secret"])
             except Exception:
-                self.notify(f"🎮 Неверный shared_secret у аккаунта {esc(acc.get('login'))} — код не создать")
-                self.reply(m.platform, m.chat_id, "Не получилось создать код, продавец уже в курсе.", m.account, m.chat_name)
+                self.notify(f"{self.ICON} Неверный shared_secret у {esc(acc.get('login'))} — код не создать", kind="errors")
+                say("Не получилось создать код, продавец уже в курсе.")
                 return True
-            left = 30 - int(time.time()) % 30
-            self.reply(m.platform, m.chat_id, f"Код Steam Guard: {code}\nДействует ещё {left} сек.", m.account, m.chat_name)
-            return True
-        if self._is(self.get("time_command"), m.text):
-            rid, r = self._active_for(m.platform, m.author)
-            text = (f"До конца аренды: {human_left(r['end'] - time.time())} "
-                    f"(до {datetime.fromtimestamp(r['end']):%d.%m %H:%M})") if r else "У вас нет активной аренды."
-            self.reply(m.platform, m.chat_id, text, m.account, m.chat_name)
-            return True
-        return False
+            say(f"Код Steam Guard: {code}\nДействует ещё {30 - int(time.time()) % 30} сек.")
+        elif is_time:
+            say(f"До конца аренды: {human_left(r['end'] - time.time())} (до {datetime.fromtimestamp(r['end']):%d.%m %H:%M})")
+        elif is_repl:
+            self.notify(f"{self.ICON} <b>{esc(m.author)} просит замену аккаунта</b> ({esc(self.NAME)}): "
+                        f"{esc(acc.get('login') or acc.get('note') or '')}",
+                        buttons=[[("🔁 Выдать другой", f"duo:mod:{self.KEY}:act:swap:{rid}", "delivery")]])
+            say("Передал продавцу — он проверит аккаунт и выдаст замену.")
+        elif is_extra:
+            if rid in self.data["extra_used"]:
+                say("Дополнительное время уже добавлялось к этой аренде.")
+            else:
+                mins = float(self.get("extra_minutes", 40) or 40)
+                r["end"] += mins * 60
+                r["reminded"] = True
+                self.data["extra_used"].append(rid)
+                self.save()
+                say(f"Добавил {mins:g} мин, чтобы вы доиграли матч ✅ Теперь до {datetime.fromtimestamp(r['end']):%H:%M}.")
+        return True
 
     # ── время ──
     def tick(self):
@@ -240,15 +262,16 @@ class RentModule(Module):
                     r["ended"] = True
                     self.reply(r["platform"], r["chat_id"], fmt_template(self.get("text_end"), **self._vars(r, acc)),
                                r["account"], r["buyer"])
+                    name = esc(acc.get("login") or acc.get("note") or acc.get("id", ""))
                     if self.get("after_end", "ask") == "ask":
                         if r["account_id"] not in self.data["dirty"]:
                             self.data["dirty"].append(r["account_id"])
-                        self.notify(f"🎮 <b>Аренда закончилась</b>: {esc(r['buyer'])} · {esc(acc.get('login'))}\n"
-                                    f"Смените пароль аккаунта и нажмите кнопку — он снова пойдёт в аренду.",
-                                    buttons=[[("✅ Пароль сменён", f"duo:mod:rent:free:{r['account_id']}", "delivery")]])
+                        what = "Смените ссылку VIP-сервера" if self.LINK_MODE else "Смените пароль аккаунта"
+                        self.notify(f"{self.ICON} <b>{esc(self.NAME)}: аренда закончилась</b> — {esc(r['buyer'])} · {name}\n"
+                                    f"{what} и нажмите кнопку — он снова пойдёт в аренду.",
+                                    buttons=[[("✅ Готово, выдавать снова", f"duo:mod:{self.KEY}:free:{r['account_id']}", "delivery")]])
                     else:
-                        self.notify(f"🎮 Аренда закончилась: {esc(r['buyer'])} · {esc(acc.get('login'))}")
-            # старые записи чистим через неделю
+                        self.notify(f"{self.ICON} {esc(self.NAME)}: аренда закончилась — {esc(r['buyer'])} · {name}")
             for rid, r in list(self.data["rentals"].items()):
                 if r.get("ended") and now - r["end"] > 7 * 86400:
                     del self.data["rentals"][rid]
@@ -257,21 +280,19 @@ class RentModule(Module):
 
     def _serve_queue(self):
         with self.lock:
-            q = self.data["queue"]
-            for item in list(q):
-                free = [a for a in self._accounts(item["game"]) if a["id"] not in self._busy_ids()]
+            for item in list(self.data["queue"]):
+                free = self._free()
                 if not free:
-                    continue
-                q.remove(item)
+                    break
+                self.data["queue"].remove(item)
                 self.save()
                 self._start(free[0], item["platform"], item["account"], item["order_id"], item["chat_id"],
-                            item["buyer"], item["game"], item["hours"])
+                            item["buyer"], item["hours"])
 
     # ── меню ──
     def status(self) -> str:
-        act = [r for r in self.data["rentals"].values() if not r.get("ended")]
-        total = len(self.get("accounts", []))
-        s = f"в аренде {len(act)} из {total}"
+        act = sum(1 for r in self.data["rentals"].values() if not r.get("ended"))
+        s = f"в аренде {act} из {len(self.get('accounts', []))}"
         if self.data["dirty"]:
             s += f" · ждут смены пароля: {len(self.data['dirty'])}"
         if self.data["queue"]:
@@ -280,7 +301,7 @@ class RentModule(Module):
 
     def actions(self) -> list:
         out = [("list", "📋 Активные аренды")]
-        out += [(f"free:{a}", f"✅ {(self.account(a) or {}).get('login', a)[:20]}: пароль сменён") for a in self.data["dirty"]]
+        out += [(f"free:{a}", f"✅ {((self.account(a) or {}).get('login') or a)[:20]}: снова выдавать") for a in self.data["dirty"]]
         return out
 
     def run_action(self, action: str, args: list) -> str:
@@ -293,15 +314,110 @@ class RentModule(Module):
             return "Аккаунт снова в работе"
         if action == "list":
             act = [r for r in self.data["rentals"].values() if not r.get("ended")]
-            if not act:
-                return "Активных аренд нет"
-            return "\n".join(f"• {r['buyer']} · {r['game']} · {(self.account(r['account_id']) or {}).get('login', '?')} · "
-                             f"осталось {human_left(r['end'] - time.time())}" for r in act)
-        if action == "stop" and args:
+            return "\n".join(f"• {r['buyer']} · {(self.account(r['account_id']) or {}).get('login', '?')} · "
+                             f"осталось {human_left(r['end'] - time.time())}" for r in act) or "Активных аренд нет"
+        if action == "swap" and args:
             with self.lock:
                 r = self.data["rentals"].get(args[0])
-                if r:
-                    r["end"] = time.time()
-            self.tick()
-            return "Аренда завершена"
+                if not r or r.get("ended"):
+                    return "Аренда уже закончилась"
+                free = self._free(exclude=[r["account_id"]])
+                if not free:
+                    return "Нет свободного аккаунта для замены"
+                if r["account_id"] not in self.data["dirty"]:
+                    self.data["dirty"].append(r["account_id"])
+                r["account_id"] = free[0]["id"]
+                self.save()
+                acc = free[0]
+            self.reply(r["platform"], r["chat_id"], "Замена аккаунта ✅\n" +
+                       fmt_template(self.get("text_start"), **self._vars(r, acc)), r["account"], r["buyer"])
+            return f"Выдан другой аккаунт: {acc.get('login') or acc.get('note')}"
         return "Нет такого действия"
+
+
+class RentSteamModule(RentBase):
+    KEY = "rentsteam"
+    NAME = "RentSteam"
+    ICON = "🎮"
+    GAME = "Steam"
+    DESCRIPTION = ("Аренда своих Steam-аккаунтов: логин и пароль, коды Steam Guard по !guard, учёт времени, "
+                   "продление повторной покупкой, замена аккаунта.")
+    DEFAULTS = dict(RentBase.DEFAULTS, text_start=("Аренда начата ✅\nЛогин: $login\nПароль: $password\nДо: $end ($hours ч)\n\n"
+                                                   "Код Steam Guard — !guard. Сколько осталось — !время. "
+                                                   "Проблема с аккаунтом — !замена.\nНе меняйте данные аккаунта."))
+
+
+class Dota2RentalModule(RentBase):
+    KEY = "dota2rental"
+    NAME = "Dota 2 Rental"
+    ICON = "🛡"
+    GAME = "Dota 2"
+    DESCRIPTION = ("Аренда своих аккаунтов Dota 2: логин, пароль и Steam Guard, таймер, продление, замена аккаунта "
+                   "по !замена (low priority, бан).")
+    DEFAULTS = dict(RentBase.DEFAULTS, text_start=("Аренда начата ✅\nЛогин: $login\nПароль: $password\nДо: $end ($hours ч)\n\n"
+                                                   "Код Steam Guard — !guard. Сколько осталось — !время. "
+                                                   "Проблема с аккаунтом — !замена.\nНе меняйте данные аккаунта."))
+
+
+class ValorantRentalModule(RentBase):
+    KEY = "valorantrental"
+    NAME = "Valorant Rental"
+    ICON = "🎯"
+    GAME = "Valorant"
+    GUARD = False
+    DESCRIPTION = ("Аренда аккаунтов Valorant: таймер, продление, коды входа Riot с почты по !код (включите EmailCode "
+                   "и укажите ящик у аккаунта). Пароль после аренды меняете вы.")
+    ACC_FIELDS = [("login", "Логин Riot", "text"), ("password", "Пароль", "secret"),
+                  ("mailbox", "Почтовый ящик (имя из EmailCode)", "text", "для кодов входа Riot"),
+                  ("note", "Заметка", "text"), ("enabled", "Используется", "bool")]
+    DEFAULTS = dict(RentBase.DEFAULTS, text_start=("Аренда Valorant начата ✅\nЛогин: $login\nПароль: $password\n"
+                                                   "До: $end ($hours ч)\n\nПопросит код с почты — напишите !код. "
+                                                   "Сколько осталось — !время."))
+
+
+class FaceitRentalModule(RentBase):
+    KEY = "faceitrental"
+    NAME = "Faceit Rental"
+    ICON = "🔥"
+    GAME = "FACEIT"
+    GUARD = False
+    EXTRA_TIME = True
+    DESCRIPTION = ("Аренда аккаунтов FACEIT: таймер и продление, !доиграть — один раз добавить время, чтобы закончить "
+                   "текущий матч, замена аккаунта при бане.")
+    DEFAULTS = dict(RentBase.DEFAULTS,
+                    text_remind="⏰ До конца аренды $left. Не успеваете доиграть матч — напишите !доиграть.")
+
+
+class VipRobloxModule(RentBase):
+    KEY = "viproblox"
+    NAME = "VIP Roblox"
+    ICON = "🧱"
+    GAME = "Roblox"
+    GUARD = False
+    LINK_MODE = True
+    DESCRIPTION = "Аренда VIP-серверов Roblox: выдаёт ссылку на сервер, считает время доступа, напоминает и продлевает."
+    ACC_FIELDS = [("note", "Название сервера (игра)", "text", "например: Blox Fruits VIP #1"),
+                  ("link", "Ссылка на VIP-сервер", "text"), ("enabled", "Используется", "bool")]
+    DEFAULTS = dict(RentBase.DEFAULTS,
+                    text_start="Доступ к VIP-серверу ✅\n$link\nДо: $end ($hours ч)\n\nСколько осталось — !время.",
+                    text_end="Доступ к VIP-серверу закончился. Спасибо! Буду рад отзыву ⭐")
+
+
+RENTALS = (RentSteamModule, Dota2RentalModule, ValorantRentalModule, FaceitRentalModule, VipRobloxModule)
+
+
+def migrate_old_rent(app):
+    """Старый общий модуль «Аренда аккаунтов» (modules.rent) переносим в RentSteam."""
+    mods = app.cfg.data.get("modules") or {}
+    old = mods.get("rent")
+    if not isinstance(old, dict):
+        return
+    new = dict(old)
+    new["accounts"] = [{k: v for k, v in a.items() if k != "game"} for a in old.get("accounts", [])]
+    new["lots"] = [{k: v for k, v in x.items() if k != "game"} for x in old.get("lots", [])]
+    mods["rentsteam"] = new
+    mods.pop("rent", None)
+    app.cfg.save()
+    src = MOD_DIR / "rent.json"
+    if src.exists() and not (MOD_DIR / "rentsteam.json").exists():
+        save_json(MOD_DIR / "rentsteam.json", load_json(src, {}))

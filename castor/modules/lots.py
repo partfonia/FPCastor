@@ -19,7 +19,7 @@ def _svc(app, acc):
 class LotTemplatesModule(Module):
     KEY = "lottemplates"
     GROUP = "Лоты и цены"
-    NAME = "Лоты из таблицы"
+    NAME = "LotBuilder"
     ICON = "🗂"
     DESCRIPTION = ("Создаёт сразу много лотов по образцу: берёт ваш готовый лот и делает копии с другими названиями, "
                    "ценами и количеством из таблицы.")
@@ -105,7 +105,7 @@ class LotTemplatesModule(Module):
 class BulkPriceModule(Module):
     KEY = "bulkprice"
     GROUP = "Лоты и цены"
-    NAME = "Массовая смена цен"
+    NAME = "BulkPrice"
     ICON = "🏷"
     DESCRIPTION = "Меняет цены сразу у многих лотов: на процент, на сумму или до ровного числа. Сначала покажет, что изменится."
     PLATFORMS = ("funpay",)
@@ -184,7 +184,7 @@ class BulkPriceModule(Module):
 class WatchModule(Module):
     KEY = "watch"
     GROUP = "Лоты и цены"
-    NAME = "Слежка за конкурентами"
+    NAME = "MarketRadar"
     ICON = "🔭"
     DESCRIPTION = "Следит за разделами FunPay: сообщает, когда появился новый продавец или кто-то сильно снизил цену."
     PLATFORMS = ("funpay",)

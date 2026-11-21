@@ -94,7 +94,7 @@ class MailCodeModule(Module):
     KEY = "mailcode"
     GROUP = "Выдача"
     ORDER = 40
-    NAME = "Коды с почты"
+    NAME = "EmailCode"
     ICON = "📧"
     DESCRIPTION = "Покупатель пишет !код — бот берёт свежий код подтверждения из нужной почты (IMAP) и присылает его."
     DEFAULTS = {
@@ -132,9 +132,11 @@ class MailCodeModule(Module):
 
     def _box_for(self, m):
         boxes = self.get("mailboxes", [])
-        rent = self.app.modules.get("rent") if getattr(self.app, "modules", None) else None
-        if rent and rent.enabled:
-            rid, r = rent._active_for(m.platform, m.author)
+        from .rent import RentBase
+        for rent in (self.app.modules.active() if getattr(self.app, "modules", None) else []):
+            if not isinstance(rent, RentBase):
+                continue
+            rid, r = rent.active_for(m.platform, m.author)
             if r:
                 acc = rent.account(r["account_id"]) or {}
                 b = next((x for x in boxes if x.get("name") and x.get("name") == acc.get("mailbox")), None)

@@ -888,6 +888,26 @@ def parse_proxy(text: str) -> Optional[dict]:
     m = re.search(r"#\s*(ipv4_shared|ipv4|ipv6|auto)\s*$", t, re.I)
     if m:
         kind, t = m.group(1).lower(), t[:m.start()].strip()
+    # формат ботов-продавцов прокси: строки с иконками «🔌 ip:порт», «👤 логин», «🔐 пароль», тип в тексте
+    if "\n" in t:
+        host = port = user = pwd = ""
+        for line in t.splitlines():
+            ln = line.strip()
+            clean = re.sub(r"^[^\w\[]+", "", ln).strip()
+            hp = _split_hostport(clean.split()[0]) if clean.split() else None
+            if hp and not host:
+                host, port = hp
+            elif re.match(r"^(👤|🧑|👨|🙍)", ln) and clean:
+                user = clean.split()[-1]
+            elif re.match(r"^(🔐|🔑|🔒|🗝)", ln) and clean:
+                pwd = clean.split()[-1]
+        if host and port:
+            if kind == "auto":
+                kind = ("ipv4_shared" if re.search(r"(?i)shared", t) else "ipv6" if re.search(r"(?i)ipv6", t)
+                        else "ipv4" if re.search(r"(?i)ipv4", t) else "auto")
+            sc = "socks5" if re.search(r"(?i)socks", t) else ("http" if re.search(r"(?i)\bhttps?\b", t) else "")
+            return {"scheme": sc or "http", "host": host.strip("[]"), "port": port, "user": user, "password": pwd,
+                    "kind": kind, "scheme_given": bool(sc)}
     # многострочный блок «ключ: значение»
     if "\n" in t or re.search(r"(?i)(порт|port|логин|login|пароль|password)\s*[:=]", t):
         kv = _parse_kv(t)
@@ -1020,7 +1040,7 @@ def split_proxies(text: str, kind: str = None) -> tuple:
     text = (text or "").strip()
     if not text:
         return [], []
-    if re.search(r"(?i)(порт|port|логин|login|пароль|password)\s*[:=]", text):
+    if re.search(r"(?i)(порт|port|логин|login|пароль|password)\s*[:=]", text) or re.search("[👤🔐🔑]", text):
         d = parse_proxy(text)
         return ([canonical_proxy(text, kind)], []) if d else ([], [text])
     good, bad = [], []

@@ -55,6 +55,22 @@ class _BufferHandler(logging.Handler):
             pass
 
 
+class _RedactSecrets(logging.Filter):
+    """Токены ботов и пароли прокси не попадают в логи (их часто пересылают в чат поддержки)."""
+    _rx = (re.compile(r"(bot|/)(\d{6,}):[A-Za-z0-9_-]{30,}"), re.compile(r"(://[^:/@\s]+):([^@\s]+)@"))
+
+    def filter(self, record):
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        new = self._rx[0].sub(r"\1\2:***", msg)
+        new = self._rx[1].sub(r"\1:***@", new)
+        if new != msg:
+            record.msg, record.args = new, ()
+        return True
+
+
 def setup_logging(level="INFO"):
     fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", "%d.%m %H:%M:%S")
     root = logging.getLogger()
@@ -69,6 +85,7 @@ def setup_logging(level="INFO"):
     bh = _BufferHandler()
     for h in (sh, fh, bh):
         h.setFormatter(fmt)
+        h.addFilter(_RedactSecrets())
         root.addHandler(h)
     quiet_libraries()
 

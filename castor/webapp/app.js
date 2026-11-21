@@ -17,10 +17,30 @@ const PN = {funpay: "FunPay", playerok: "Playerok"};
 function toast(t) { const e = $("#toast"); e.textContent = t; e.classList.add("on"); clearTimeout(e._t); e._t = setTimeout(() => e.classList.remove("on"), 2400); }
 function haptic(type = "success") { try { tg && tg.HapticFeedback.notificationOccurred(type); } catch (e) {} }
 
-async function api(path, body) {
-  const r = await fetch("/api/" + path, {method: body ? "POST" : "GET",
-    headers: {"Content-Type": "application/json", "X-Token": TOKEN}, body: body ? JSON.stringify(body) : undefined});
-  if (r.status === 401) { TOKEN = ""; sessionStorage.removeItem("duo_t"); showLogin(); throw new Error("auth"); }
+async function tgAuth() {
+  // вход через Telegram: подпись initData проверяет сервер
+  try {
+    const j = await (await fetch("/api/auth", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({initData: tg.initData})})).json();
+    if (j.token) { TOKEN = j.token; sessionStorage.setItem("duo_t", TOKEN); return true; }
+    if (j.error) $("#lhint").textContent = j.error;
+  } catch (e) {
+    $("#lhint").textContent = "Бот не отвечает. Проверьте, что он запущен на компьютере, и откройте панель заново.";
+  }
+  return false;
+}
+async function api(path, body, retry = true) {
+  let r;
+  try {
+    r = await fetch("/api/" + path, {method: body ? "POST" : "GET",
+      headers: {"Content-Type": "application/json", "X-Token": TOKEN}, body: body ? JSON.stringify(body) : undefined});
+  } catch (e) { toast("Нет связи с ботом — он запущен?"); haptic("error"); throw e; }
+  if (r.status === 401) {
+    TOKEN = ""; sessionStorage.removeItem("duo_t");
+    // бот перезапускался — тихо входим заново через Telegram и повторяем запрос
+    if (retry && inTG && await tgAuth()) return api(path, body, false);
+    showLogin(); throw new Error("auth");
+  }
   const j = await r.json().catch(() => ({error: "Сервер вернул не JSON"}));
   if (j.error) { toast(j.error); haptic("error"); }
   return j;
@@ -28,14 +48,7 @@ async function api(path, body) {
 
 /* ───────── вход ───────── */
 async function boot() {
-  if (!TOKEN && inTG) {
-    try {
-      const j = await (await fetch("/api/auth", {method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({initData: tg.initData})})).json();
-      if (j.token) { TOKEN = j.token; sessionStorage.setItem("duo_t", TOKEN); }
-      else if (j.error) $("#lhint").textContent = j.error;
-    } catch (e) {}
-  }
+  if (!TOKEN && inTG) await tgAuth();
   if (!TOKEN) return showLogin();
   $("#login").hidden = true; $("#app").hidden = false;
   ME = await api("me");

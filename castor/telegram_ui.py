@@ -47,6 +47,29 @@ def kb(rows, perms=None) -> "IKM":
     return m
 
 
+try:  # pyTelegramBotAPI ≥ 4.15: новый параметр вместо устаревшего disable_web_page_preview
+    from telebot.types import LinkPreviewOptions
+    NOPREVIEW = {"link_preview_options": LinkPreviewOptions(is_disabled=True)}
+except Exception:  # pragma: no cover
+    NOPREVIEW = {"disable_web_page_preview": True}
+
+
+def rub(v) -> str:
+    """1234.5 → «1 234,5 ₽»"""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    s = f"{v:,.2f}".rstrip("0").rstrip(".").replace(",", " ").replace(".", ",")
+    return f"{s} ₽"
+
+
+def plural(n, one, few, many):
+    n = abs(int(n)) % 100
+    n1 = n % 10
+    return many if 10 < n < 20 else few if 1 < n1 < 5 else one if n1 == 1 else many
+
+
 def onoff(v):
     return "🟢" if v else "🔴"
 
@@ -62,7 +85,8 @@ NOTIFY_NAMES = {
 
 # какое право нужно для callback-действия (duo:<действие>:…)
 CB_PERM = {
-    "main": None, "cancel": None, "about": None, "wm": "settings", "wmp": "settings", "status": "orders", "stats": "finance", "fin": "finance",
+    "main": None, "cancel": None, "about": None, "help": None, "set": None, "shops": "settings", "webapp": None,
+    "tunnel": "system", "wm": "settings", "wmp": "settings", "status": "orders", "stats": "finance", "fin": "finance",
     "reply": "chat", "tpl": "chat", "tps": "chat", "cust": "customers",
     "refund": "refund", "refund2": "refund", "plsent": "delivery", "manual": "delivery",
     "dlv": "products", "dadd": "products", "dnew": "delivery", "dtog": "delivery", "ddel": "delivery",
@@ -135,7 +159,9 @@ class TelegramUI:
                 bot.infinity_polling(timeout=30, long_polling_timeout=25, skip_pending=True,
                                      allowed_updates=["message", "callback_query"])
             except Exception as e:
-                log.warning("Telegram polling: %s", e)
+                from .core import _proxy_reason
+                why = _proxy_reason(e) if "proxy" in str(e).lower() or "socks" in str(e).lower() else str(e)[:160]
+                log.warning("🤖 Telegram: связь прервалась (%s) — переподключаюсь через 5 с", why)
             if bot is self.bot:
                 time.sleep(5)
 
@@ -201,11 +227,12 @@ class TelegramUI:
         return perms_of(self.app.team.role(uid))
 
     def refresh_commands(self):
-        cmds = [BotCommand("menu", "Админ-панель"), BotCommand("status", "Статус"),
-                BotCommand("stats", "Статистика"), BotCommand("raise", "Поднять лоты FunPay"),
-                BotCommand("plugins", "Плагины"), BotCommand("logs", "Логи"),
-                BotCommand("restart", "Перезапуск"), BotCommand("app", "Мини-апп"),
-                BotCommand("proxy", "Бот и прокси"), BotCommand("vacation", "Режим отпуска вкл/выкл")]
+        cmds = [BotCommand("menu", "🏠 Главное меню"), BotCommand("app", "📱 Открыть панель"),
+                BotCommand("status", "📊 Сводка: аккаунты и остатки"), BotCommand("stats", "💰 Выручка и прибыль"),
+                BotCommand("raise", "⬆️ Поднять лоты FunPay"), BotCommand("vacation", "🏖 Отпуск вкл/выкл"),
+                BotCommand("settings", "⚙️ Настройки"), BotCommand("proxy", "🤖 Бот и прокси"),
+                BotCommand("logs", "📜 Файл логов"), BotCommand("restart", "🔄 Перезапуск"),
+                BotCommand("help", "❓ Как пользоваться")]
         for c, d in self.app.cardinal.telegram_commands.items():
             cmds.append(BotCommand(c, str(d)[:255]))
         try:
@@ -234,7 +261,7 @@ class TelegramUI:
         url = self.app.public_url
         if url and url.startswith("https://"):
             try:
-                self.bot.set_chat_menu_button(menu_button=MenuButtonWebApp("web_app", "Панель", WebAppInfo(url)))
+                self.bot.set_chat_menu_button(menu_button=MenuButtonWebApp("web_app", "📱 Панель", WebAppInfo(url)))
             except Exception as e:
                 log.warning("Не удалось поставить кнопку мини-аппа: %s", e)
 
@@ -249,7 +276,7 @@ class TelegramUI:
             body = text if (limited is None or "finance" in perms) else limited
             try:
                 self.bot.send_message(u["id"], body, reply_markup=kb(buttons, perms) if buttons else None,
-                                      disable_web_page_preview=True)
+                                      **NOPREVIEW)
             except Exception as e:
                 log.debug("TG notify %s: %s", u["id"], e)
         if perm in ("chat", "orders", "products", "delivery"):
@@ -257,7 +284,7 @@ class TelegramUI:
             for chat in self.cfg.get("telegram.extra_chats", []):
                 try:
                     self.bot.send_message(chat, limited or text, reply_markup=kb(url_only) if any(url_only) else None,
-                                          disable_web_page_preview=True)
+                                          **NOPREVIEW)
                 except Exception as e:
                     log.debug("TG notify chat %s: %s", chat, e)
 
@@ -265,16 +292,16 @@ class TelegramUI:
         perms = self.perms(call.from_user.id)
         try:
             self.bot.edit_message_text(text, call.message.chat.id, call.message.message_id,
-                                       reply_markup=kb(rows, perms), disable_web_page_preview=True)
+                                       reply_markup=kb(rows, perms), **NOPREVIEW)
         except Exception as e:
             if "not modified" not in str(e):
                 self.bot.send_message(call.message.chat.id, text, reply_markup=kb(rows, perms),
-                                      disable_web_page_preview=True)
+                                      **NOPREVIEW)
 
     def send(self, chat_id, text, rows=None, uid=None):
         perms = self.perms(uid or chat_id)
         return self.bot.send_message(chat_id, text, reply_markup=kb(rows, perms) if rows else None,
-                                     disable_web_page_preview=True)
+                                     **NOPREVIEW)
 
     # ---------- состояния (совместимо с Cardinal) ----------
     def set_state(self, chat_id, message_id, user_id, state, data=None):
@@ -331,37 +358,160 @@ class TelegramUI:
         st = self.app.status()
         perms = self.perms(uid)
         fin = "finance" in perms
-        fp, pl = st["funpay"], st["playerok"]
         t = self.app.stats.today()
         role = ROLE_NAMES.get(self.app.team.role(uid), "")
 
-        def line(icon, name, p, s):
-            state = onoff(s["ok"]) if s["enabled"] else "⚪️ выкл"
-            accs = f" · {s['accounts']} акк." if s["accounts"] > 1 else ""
-            money = f"\n   сегодня: {t[p]['count']} зак. · {t[p]['sum']} · прибыль {t[p]['profit']}" if fin else \
-                f"\n   сегодня: {t[p]['count']} зак."
-            return f"{icon} {name}: {state} {esc(s['username'] or '')}{accs}{money}"
-        text = (f"<b>{SIGN} {APP_NAME}</b> v{VERSION} · ⏱ {st['uptime']} · {role}\n\n"
-                + line("🔵", "FunPay", "funpay", fp) + "\n" + line("🟢", "Playerok", "playerok", pl)
-                + (f"\n💰 Сегодня всего: <b>{t['total']['sum']}</b> · прибыль <b>{t['total']['profit']}</b>" if fin else "")
-                + ("\n🏖 <b>Режим отпуска включён</b>" if st["vacation"] else "")
-                + (f"\n🏭 Ждут проверки у поставщика: {st['supplier_pending']}" if st["supplier_pending"] and "delivery" in perms else "")
-                + ("".join(f"\n⏸ Автовывод {'FunPay' if p == 'funpay' else 'Playerok'} на паузе" for p, w in st["withdraw"].items()
-                           if w["paused"]) if "withdraw" in perms else ""))
+        # что требует внимания — наверху, чтобы не искать
+        alerts = []
+        for a in st["accounts"]:
+            if a["running"] and not a["ok"]:
+                alerts.append(f"{'🔵' if a['platform'] == 'funpay' else '🟢'} {esc(a['name'])}: "
+                              f"{esc(a['error'] or 'нет связи')}")
+        if not st["accounts"]:
+            alerts.append("Нет ни одного аккаунта — добавьте в «🏪 Магазины»")
+        if st["supplier_pending"] and "delivery" in perms:
+            alerts.append(f"🏭 У поставщика ждут проверки: {st['supplier_pending']}")
+        if "withdraw" in perms:
+            alerts += [f"⏸ Автовывод {'FunPay' if p == 'funpay' else 'Playerok'} на паузе"
+                       for p, w in st["withdraw"].items() if w["paused"]]
+        low = self.cfg.get("features.low_stock.threshold", 0) or 0
+        empty = [k for k, v in st["products"].items() if v <= low]
+        if empty and "products" in perms:
+            alerts.append(f"📦 Заканчивается товар: {esc(', '.join(empty[:3]))}" + (" …" if len(empty) > 3 else ""))
+
+        head = f"<b>{SIGN} Castor</b>  ·  v{VERSION}"
+        health = "🟢 Всё работает" if not alerts else f"🟠 Нужно внимание: {len(alerts)}"
+        if st["vacation"]:
+            health += "  ·  🏖 отпуск"
+        text = f"{head}\n{health}  ·  ⏱ {st['uptime']}\n"
+
+        n = t["total"]["count"] if "count" in t["total"] else t["funpay"]["count"] + t["playerok"]["count"]
+        text += f"\n<b>📈 Сегодня</b>\n"
+        if fin:
+            text += (f"Заказов: <b>{n}</b> на <b>{rub(t['total']['sum'])}</b>\n"
+                     f"Прибыль: <b>{rub(t['total']['profit'])}</b>\n")
+        else:
+            text += f"Заказов: <b>{n}</b>\n"
+
+        text += "\n<b>🏪 Магазины</b>\n"
+        accs = st["accounts"]
+        if accs:
+            for a in accs[:6]:
+                dot = "⚪️" if not a["running"] else ("🟢" if a["ok"] else "🔴")
+                bal = f"  ·  {rub(a['balance'])}" if fin and a["running"] and isinstance(a["balance"], (int, float)) else ""
+                text += f"{dot} {'FunPay' if a['platform'] == 'funpay' else 'Playerok'} · {esc(a['name'])}{bal}\n"
+            if len(accs) > 6:
+                text += f"… и ещё {len(accs) - 6}\n"
+        else:
+            text += "пока нет\n"
+        if alerts:
+            text += "\n<b>⚠️ Внимание</b>\n" + "\n".join(f"• {x}" for x in alerts[:5]) + "\n"
+        text += f"\n<i>{esc(role)}</i>"
+
         rows = []
-        if self.app.public_url.startswith("https://"):
-            rows.append([("📱 Открыть мини-апп", ("webapp", self.app.public_url))])
-        rows += [[("📊 Статус", "duo:status", "orders"), ("💰 Финансы", "duo:fin", "finance")],
-                 [("🔵 FunPay", "duo:fp", "settings"), ("🟢 Playerok", "duo:pl", "settings")],
-                 [("💬 Автоответы", "duo:cmds", "settings"), ("📦 Автовыдача", "duo:dlv", "products")],
-                 [("✨ Функции", "duo:feat", "settings"), ("🔔 Уведомления", "duo:ntf", "settings")],
-                 [("🤖 Бот и прокси", "duo:prx", "system"), ("🧩 Плагины", "duo:plg:0", "plugins")],
-                 [("👥 Покупатели", "duo:cust", "customers"), ("👨‍💼 Команда", "duo:team", "users")],
-                 [(f"🏖 Отпуск {onoff(st['vacation'])}", "duo:t:features.vacation.enabled:main", "settings"),
-                  ("⚙️ Общее", "duo:gen", "settings")],
-                 [("💾 Бекап", "duo:backup", "secrets"), ("📜 Логи", "duo:logs", "system"),
-                  ("🔄 Перезапуск", "duo:restart", "system")],
-                 [("ℹ️ О боте", "duo:about")]]
+        url = self.app.public_url
+        if url.startswith("https://"):
+            rows.append([("📱 Открыть панель", ("webapp", url))])
+        rows += [[("📊 Сводка", "duo:status", "orders"), ("💰 Финансы", "duo:fin", "finance")],
+                 [("🏪 Магазины", "duo:shops", "settings"), ("📦 Товары", "duo:dlv", "products")],
+                 [("💬 Автоответы", "duo:cmds", "settings"), ("👥 Покупатели", "duo:cust", "customers")],
+                 [("⬆️ Поднять лоты", "duo:raise", "settings"),
+                  (f"🏖 Отпуск: {'вкл' if st['vacation'] else 'выкл'}", "duo:t:features.vacation.enabled:main", "settings")],
+                 [("⚙️ Настройки", "duo:set"), ("❓ Помощь", "duo:help")]]
+        return text, rows
+
+    def settings_menu(self, uid):
+        perms = self.perms(uid)
+        text = ("<b>⚙️ Настройки</b>\n\n"
+                "✨ <b>Функции</b> — напоминания, отчёт за день, антифлуд, автобекап\n"
+                "🔔 <b>Уведомления</b> — о чём писать вам в Telegram\n"
+                "🕘 <b>Работа</b> — рабочие часы, шаблоны, чёрный список\n"
+                "✍️ <b>Подпись</b> — водяной знак в сообщениях покупателям\n"
+                "🤖 <b>Бот и прокси</b> — сменить бота, прокси для Telegram\n"
+                "📱 <b>Мини-апп</b> — работает ли панель, новый адрес\n"
+                "🧩 <b>Плагины</b> · 👨‍💼 <b>Команда</b> — помощники и их права")
+        rows = [[("✨ Функции", "duo:feat", "settings"), ("🔔 Уведомления", "duo:ntf", "settings")],
+                [("🕘 Работа", "duo:gen", "settings"), ("✍️ Подпись", "duo:wm", "settings")],
+                [("🤖 Бот и прокси", "duo:prx", "system"), ("📱 Мини-апп", "duo:webapp")],
+                [("🧩 Плагины", "duo:plg:0", "plugins"), ("👨‍💼 Команда", "duo:team", "users")],
+                [("💾 Бекап", "duo:backup", "secrets"), ("📜 Логи", "duo:logs", "system"),
+                 ("🔄 Перезапуск", "duo:restart", "system")],
+                [("ℹ️ О боте", "duo:about"), ("🏠 Главное меню", "duo:main")]]
+        if not any(len(r) > 2 and r[2] in perms for row in rows for r in row):
+            text = "<b>⚙️ Настройки</b>\n\nУ вашей роли нет доступа к настройкам."
+        return text, rows
+
+    def shops_menu(self):
+        st = self.app.status()
+        text = "<b>🏪 Магазины</b>\n"
+        for p, name, icon in (("funpay", "FunPay", "🔵"), ("playerok", "Playerok", "🟢")):
+            accs = [a for a in st["accounts"] if a["platform"] == p]
+            on = self.cfg.get(f"{p}.enabled")
+            text += f"\n{icon} <b>{name}</b>" + ("" if on else "  ·  <i>выключен</i>") + "\n"
+            if not accs:
+                text += "   аккаунтов нет\n"
+            for a in accs:
+                dot = "⚪️" if not a["running"] else ("🟢" if a["ok"] else "🔴")
+                text += f"   {dot} {esc(a['name'])}" + (f" — {esc(a['error'])}" if a["error"] and not a["ok"] else "") + "\n"
+        raise_txt = [x for a in st["accounts"] for x in a.get("raise", [])]
+        if raise_txt:
+            text += "\n<b>⬆️ Поднятие</b>\n" + esc("\n".join(raise_txt[:4]))
+        text += "\n\n<i>Откройте площадку, чтобы добавить аккаунт или настроить автоответ, приветствие и выдачу.</i>"
+        rows = [[("🔵 FunPay", "duo:fp"), ("🟢 Playerok", "duo:pl")],
+                [("⬆️ Поднять лоты", "duo:raise"), ("💰 Балансы", "duo:fpbal", "finance")],
+                [("🏠 Главное меню", "duo:main")]]
+        return text, rows
+
+    def help_menu(self):
+        text = (f"<b>❓ Как пользоваться</b>\n\n"
+                "<b>Главное меню</b> — /menu. Сверху видно, всё ли работает и что требует внимания.\n\n"
+                "📊 <b>Сводка</b> — состояние аккаунтов, Telegram и остатки товара\n"
+                "💰 <b>Финансы</b> — выручка и прибыль за день, неделю, месяц\n"
+                "🏪 <b>Магазины</b> — аккаунты FunPay и Playerok, автоответ, приветствие\n"
+                "📦 <b>Товары</b> — автовыдача: что выдавать по какому заказу\n"
+                "💬 <b>Автоответы</b> — ответы на команды покупателей (!помощь и т.п.)\n"
+                "🏖 <b>Отпуск</b> — бот сам ответит, что вы временно не работаете\n\n"
+                "📱 <b>Панель</b> — то же самое, но удобнее: кнопка «Панель» слева от поля ввода. "
+                "Если не открывается — «⚙️ Настройки» → «📱 Мини-апп».\n\n"
+                "<b>Команды</b>\n"
+                "/menu — главное меню\n/status — сводка\n/app — открыть панель\n"
+                "/raise — поднять лоты FunPay\n/vacation — отпуск вкл/выкл\n"
+                "/proxy — бот и прокси\n/logs — файл логов\n/restart — перезапуск")
+        lk = links_html(self.cfg, esc)
+        if lk:
+            text += f"\n\n{lk}"
+        return text, [[("🏠 Главное меню", "duo:main")]]
+
+    def webapp_menu(self):
+        web = self.app.web
+        url = self.app.public_url
+        tun = web.tunnel if web else {"state": "off", "error": ""}
+        mode = self.cfg.get("web.tunnel")
+        local = f"http://127.0.0.1:{self.cfg.get('web.port')}"
+        state = {"ok": "🟢 работает", "starting": "🟡 запускается…", "unreachable": "🔴 не открывается",
+                 "failed": "🔴 не запустился", "off": "⚪️ выключен"}.get(tun["state"], tun["state"])
+        if tun["state"] == "off" and url:
+            state = "🔗 свой адрес — нажмите «🔄 Проверить»"
+        text = (f"<b>📱 Мини-апп</b>\n\nСостояние: {state}"
+                + (f" ({esc(tun['error'])})" if tun.get("error") and tun["state"] != "ok" else "")
+                + (f"\nАдрес: <code>{esc(url)}</code>" if url else "")
+                + f"\nНа компьютере: <code>{local}</code>\n")
+        if tun["state"] == "unreachable":
+            text += ("\n<b>Что сделать</b>\n"
+                     "1. Подождите минуту — новый адрес Cloudflare включается не сразу, потом «🔄 Проверить».\n"
+                     "2. Включите VPN на телефоне: в России адреса trycloudflare.com часто тормозят.\n"
+                     "3. Не помогло — «♻️ Новый адрес».\n")
+        elif mode != "cloudflared" and not url:
+            text += ("\nАвтоматический адрес выключен. Включите туннель Cloudflare в мастере настройки "
+                     "или укажите свой HTTPS-адрес кнопкой ниже.\n")
+        text += "\n<i>Адрес меняется при каждом запуске бота — открывайте панель кнопкой «Панель» или из /menu, "
+        text += "а не по старым сообщениям.</i>"
+        rows = []
+        if url.startswith("https://"):
+            rows.append([("📱 Открыть панель", ("webapp", url))])
+        rows += [[("🔄 Проверить", "duo:tunnel:check", "system"), ("♻️ Новый адрес", "duo:tunnel:restart", "system")],
+                 [("🔗 Свой адрес", "duo:e:web.public_url", "system"), ("🔐 Пароль панели", "duo:e:web.password", "secrets")],
+                 [("◀️ Настройки", "duo:set")]]
         return text, rows
 
     def about_menu(self):
@@ -374,7 +524,7 @@ class TelegramUI:
                 [("🛠 GitHub", "duo:e:project.links.github", "settings"),
                  (f"{onoff(self.cfg.get('project.set_bot_description', True))} Описание бота",
                   "duo:t:project.set_bot_description:about", "settings")],
-                [("◀️ Назад", "duo:main")]]
+                [("◀️ Назад", "duo:set")]]
         return text, rows
 
     def watermark_menu(self):
@@ -425,7 +575,7 @@ class TelegramUI:
                      [("⬆️ Поднять сейчас", "duo:raise"), ("💰 Балансы", "duo:fpbal", "finance")]]
         else:
             rows += [[(f"{onoff(c.get('playerok.mark_sent'))} Отмечать отправленным", "duo:t:playerok.mark_sent:pl")]]
-        rows += [[("✏️ Текст приветствия", f"duo:e:{k}.greeting.text")], [("◀️ Назад", "duo:main")]]
+        rows += [[("✏️ Текст приветствия", f"duo:e:{k}.greeting.text")], [("◀️ Назад", "duo:shops")]]
         return text, rows
 
     def account_card(self, acc_id):
@@ -492,7 +642,7 @@ class TelegramUI:
             for u in users) + "\n\n" + "\n".join(f"<b>{ROLE_NAMES[r]}</b>: {ROLE_HINTS[r]}" for r in ROLES)
         rows = [[(f"{ROLE_NAMES.get(u.get('role'), '')[:1]} {u.get('name') or u['id']}", f"duo:usr:{u['id']}")] for u in users]
         rows += [[("➕ Пригласить менеджера", "duo:inv:manager"), ("➕ Админа", "duo:inv:admin")],
-                 [("➕ Совладельца", "duo:inv:owner")], [("◀️ Назад", "duo:main")]]
+                 [("➕ Совладельца", "duo:inv:owner")], [("◀️ Назад", "duo:set")]]
         return text, rows
 
     def user_card(self, uid):
@@ -517,7 +667,7 @@ class TelegramUI:
                 [("🚫 ЧС +", "duo:e:blacklist.add"), ("✅ ЧС −", "duo:e:blacklist.remove")],
                 [("🔐 Пароль панели", "duo:e:web.password", "secrets"), ("🔗 URL мини-аппа", "duo:e:web.public_url", "system")],
                 [("📣 Чаты для уведомлений", "duo:e:extra_chats", "system")],
-                [("◀️ Назад", "duo:main")]]
+                [("◀️ Назад", "duo:set")]]
         return text, rows
 
     def stats_text(self):
@@ -562,7 +712,7 @@ class TelegramUI:
                  ("🌙 Время отчёта", "duo:e:features.daily_report.time")],
                 [("📉 Порог остатков", "duo:e:features.low_stock.threshold"), ("🔗 Вебхуки", "duo:e:webhooks")],
                 [("🏖 Отпуск: до даты", "duo:e:features.vacation.until"), ("✏️ Текст отпуска", "duo:e:features.vacation.text")],
-                [("◀️ Назад", "duo:main")]]
+                [("◀️ Назад", "duo:set")]]
         return text, rows
 
     def customers_menu(self):
@@ -609,7 +759,7 @@ class TelegramUI:
                 row = []
         if row:
             rows.append(row)
-        rows.append([("◀️ Назад", "duo:main")])
+        rows.append([("◀️ Назад", "duo:set")])
         return "<b>🔔 Уведомления</b>", rows
 
     def plugins_menu(self, offset=0):
@@ -627,7 +777,7 @@ class TelegramUI:
             nav.append(("➡️", f"duo:plg:{offset + 8}"))
         if nav:
             rows.append(nav)
-        rows.append([("◀️ Назад", "duo:main")])
+        rows.append([("◀️ Назад", "duo:set")])
         return text, rows
 
     def plugin_card(self, uid):
@@ -705,7 +855,7 @@ class TelegramUI:
                      (f"{onoff(pc.get('failover', True))} Автопереключение", "duo:t:telegram.proxy.failover:prx")])
         rows.append([("➕ Добавить прокси", "duo:xadd"), ("🧪 Проверить все", "duo:xall")])
         rows.append([("🔁 Применить сейчас", "duo:xapply"), ("🤖 Сменить бота", "duo:e:telegram.token", "secrets")])
-        rows.append([("◀️ Назад", "duo:main")])
+        rows.append([("◀️ Назад", "duo:set")])
         text += ("\nПрокси можно присылать в любом виде — бот сам приведёт запись к нужному формату. "
                  "🏷 — тип: IPv4, IPv4 Shared или IPv6.\n<i>Изменения применяются сразу, без перезапуска.</i>")
         return text, rows
@@ -741,7 +891,7 @@ class TelegramUI:
                                     f"❌ Это приватный бот <b>{APP_NAME}</b>.\nВаш ID: <code>{uid}</code>\n"
                                     f"Чтобы получить доступ, попросите владельца прислать приглашение."
                                     + (f"\n\n🛠 Хотите такого же бота себе?\n{lk}" if lk else ""),
-                                 disable_web_page_preview=True)
+                                 **NOPREVIEW)
                     return
                 else:
                     bot.reply_to(m, f"{SIGN} Привет! Это <b>{APP_NAME}</b>.\n\n🔑 У бота ещё нет владельца.\n"
@@ -783,15 +933,20 @@ class TelegramUI:
             bot.send_message(m.chat.id, "🔄 Перезапускаюсь…")
             threading.Thread(target=self.app.restart, daemon=True).start()
 
-        @bot.message_handler(commands=["app"], func=member)
+        @bot.message_handler(commands=["app", "panel"], func=member)
         def _app(m):
-            url = self.app.public_url
-            if url.startswith("https://"):
-                bot.send_message(m.chat.id, "📱 Мини-апп:", reply_markup=kb([[("Открыть", ("webapp", url))]]))
-            else:
-                bot.send_message(m.chat.id, "Мини-аппу нужен HTTPS-адрес. Включите туннель cloudflared "
-                                            "или укажите свой домен (⚙️ Общее → URL мини-аппа).\n"
-                                            f"Из браузера: http://IP:{self.cfg.get('web.port')}")
+            t, r = self.webapp_menu()
+            self.send(m.chat.id, t, r, m.from_user.id)
+
+        @bot.message_handler(commands=["help"], func=member)
+        def _help(m):
+            t, r = self.help_menu()
+            self.send(m.chat.id, t, r, m.from_user.id)
+
+        @bot.message_handler(commands=["settings"], func=member)
+        def _settings(m):
+            t, r = self.settings_menu(m.from_user.id)
+            self.send(m.chat.id, t, r, m.from_user.id)
 
         @bot.message_handler(commands=["proxy", "bot"], func=need("system"))
         def _proxy(m):
@@ -1152,9 +1307,25 @@ class TelegramUI:
         screens = {"cmds": self.cmds_menu, "dlv": self.dlv_menu, "ntf": self.notify_menu,
                    "prx": self.proxy_menu, "gen": self.general_menu, "feat": self.features_menu,
                    "cust": self.customers_menu, "team": self.team_menu, "wm": self.watermark_menu,
-                   "about": self.about_menu}
+                   "about": self.about_menu, "shops": self.shops_menu, "help": self.help_menu,
+                   "webapp": self.webapp_menu}
         if a == "main":
             self.edit(c, *self.main_menu(uid))
+        elif a == "set":
+            self.edit(c, *self.settings_menu(uid))
+        elif a == "tunnel":
+            web = self.app.web
+            if not web:
+                bot.answer_callback_query(c.id, "Веб-панель выключена", show_alert=True)
+                return
+            if parts[2] == "restart":
+                web.restart_tunnel()
+                bot.answer_callback_query(c.id, "Получаю новый адрес… Через минуту придёт сообщение.")
+            else:
+                bot.answer_callback_query(c.id, "Проверяю…")
+                web.check_tunnel()
+            self.edit(c, *self.webapp_menu())
+            return
         elif a in screens:
             self.edit(c, *screens[a]())
         elif a == "fin" or a == "stats":
@@ -1162,7 +1333,7 @@ class TelegramUI:
         elif a in ("fp", "pl"):
             self.edit(c, *self.platform_menu(a))
         elif a == "status":
-            self.edit(c, self.status_text(uid), [[("🔄 Обновить", "duo:status"), ("◀️ Назад", "duo:main")]])
+            self.edit(c, self.status_text(uid), [[("🔄 Обновить", "duo:status"), ("🏠 Главное меню", "duo:main")]])
         elif a == "t":
             path, back = parts[2], parts[3]
             if path.startswith(("telegram.proxy",)) and not self.can(uid, "system"):
@@ -1176,6 +1347,8 @@ class TelegramUI:
                 self.app.sync_accounts()
             if back == "main":
                 self.edit(c, *self.main_menu(uid))
+            elif back == "set":
+                self.edit(c, *self.settings_menu(uid))
             elif back in ("fp", "pl"):
                 self.edit(c, *self.platform_menu(back))
             else:

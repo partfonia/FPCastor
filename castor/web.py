@@ -60,6 +60,7 @@ class WebServer:
         self.sessions: dict = {}
         self.httpd = None
         self.tunnel_proc = None
+        self.tunnel = {"state": "off", "error": "", "checked": 0}  # off · starting · ok · unreachable · failed
         self._fails: dict = {}
 
     def start(self):
@@ -116,30 +117,80 @@ class WebServer:
 
     def start_tunnel(self, port):
         def run():
+            self.tunnel.update(state="starting", error="")
             binp = self._cloudflared_bin()
             if not binp:
+                self.tunnel.update(state="failed", error="cloudflared не скачался — проверьте интернет")
                 return
             while self.app.running:
                 try:
+                    self.tunnel.update(state="starting", error="")
                     self.tunnel_proc = subprocess.Popen(
                         [binp, "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{port}"],
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                        errors="replace", **({"creationflags": 0x08000000} if os.name == "nt" else {}))
                     for line in self.tunnel_proc.stdout:
                         m = re.search(r"https://[a-z0-9\-]+\.trycloudflare\.com", line)
                         if m and m.group(0) != self.app.public_url:
                             self.app.public_url = m.group(0)
-                            log.info("🔗 Мини-апп: %s", self.app.public_url)
-                            if self.app.tg:
-                                self.app.tg.setup_menu_button()
-                                self.app.notify("start", f"📱 Мини-апп: {self.app.public_url}",
-                                                buttons=[[("Открыть панель", ("webapp", self.app.public_url))]])
+                            threading.Thread(target=self._announce, daemon=True).start()
                     self.tunnel_proc.wait()
                 except Exception as e:
                     log.error("cloudflared: %s", e)
                 if self.app.running:
+                    self.tunnel.update(state="starting", error="туннель перезапускается")
                     log.warning("cloudflared завершился, перезапуск через 10 с")
                     time.sleep(10)
         threading.Thread(target=run, name="tunnel", daemon=True).start()
+
+    def check_tunnel(self, attempts=1, pause=5) -> bool:
+        """Открывается ли мини-апп снаружи (через адрес туннеля)."""
+        url = self.app.public_url
+        if not url.startswith("https://"):
+            self.tunnel.update(state="off" if not url else "failed", error="нет HTTPS-адреса")
+            return False
+        err = ""
+        for i in range(attempts):
+            try:
+                r = requests.get(url + "/api/health", timeout=10)
+                if r.ok and r.json().get("ok"):
+                    self.tunnel.update(state="ok", error="", checked=time.time())
+                    return True
+                err = f"ответ {r.status_code}"
+            except requests.Timeout:
+                err = "не ответил за 10 с"
+            except Exception:
+                err = "не удалось подключиться"
+            if i < attempts - 1:
+                time.sleep(pause)
+        self.tunnel.update(state="unreachable", error=err, checked=time.time())
+        return False
+
+    def _announce(self):
+        """Новый адрес: ждём, пока туннель реально заработает, и только потом ставим кнопку."""
+        url = self.app.public_url
+        ok = self.check_tunnel(attempts=12, pause=5)  # Cloudflare публикует адрес до минуты
+        if url != self.app.public_url:
+            return
+        if self.app.tg:
+            self.app.tg.setup_menu_button()
+        if ok:
+            log.info("📱 Мини-апп работает: %s", url)
+            self.app.notify("start", "📱 <b>Мини-апп готов.</b> Открывайте кнопкой «Панель» слева от поля ввода "
+                                     "или из меню /menu.\n<i>При каждом запуске адрес новый — старые кнопки не работают.</i>",
+                            buttons=[[("📱 Открыть панель", ("webapp", url))]])
+        else:
+            log.warning("📱 Мини-апп: адрес %s не открывается (%s). Если вы в России — Cloudflare может "
+                        "тормозиться провайдером, включите VPN на телефоне.", url, self.tunnel["error"])
+
+    def restart_tunnel(self):
+        self.app.public_url = ""
+        self.tunnel.update(state="starting", error="")
+        try:
+            if self.tunnel_proc:
+                self.tunnel_proc.terminate()
+        except Exception:
+            pass
 
     # ═════════ сессии и права ═════════
     def new_session(self, uid, role):
@@ -556,18 +607,21 @@ class WebServer:
                 p = u.path[5:] if u.path.startswith("/api/") else ""
                 b = self._body()
                 if p == "auth":
-                    ip = self.client_address[0]
+                    ip = self.headers.get("CF-Connecting-IP") or self.client_address[0]
                     fails = [t for t in srv._fails.get(ip, []) if time.time() - t < 600]
                     if len(fails) >= 8:
                         return self._send(429, {"error": "Слишком много попыток. Подождите 10 минут."})
                     if b.get("initData"):
                         user = check_webapp_init_data(b["initData"], app.cfg.get("telegram.token", ""))
-                        role = app.team.role(user["id"]) if user else ""
+                        if not user:
+                            return self._send(200, {"error": "Telegram не подтвердил вход. Откройте панель кнопкой "
+                                                             "из этого бота (не пересланной ссылкой)."})
+                        role = app.team.role(user["id"])
                         if role:
                             return self._send(200, {"token": srv.new_session(int(user["id"]), role),
                                                     "user": user.get("first_name", "")})
-                        srv._fails[ip] = fails + [time.time()]
-                        return self._send(200, {"error": "Вас нет в команде этого бота. Попросите владельца прислать приглашение."})
+                        return self._send(200, {"error": f"Вас нет в команде этого бота (ID {user['id']}). "
+                                                         f"Попросите владельца прислать приглашение."})
                     pwd = app.cfg.get("web.password") or app.cfg.get("telegram.password")
                     if pwd and b.get("password") and hmac.compare_digest(str(b["password"]), str(pwd)):
                         return self._send(200, {"token": srv.new_session(0, "owner")})

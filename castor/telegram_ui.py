@@ -90,8 +90,8 @@ NOTIFY_NAMES = {
 
 # какое право нужно для callback-действия (duo:<действие>:…)
 CB_PERM = {
-    "main": None, "cancel": None, "about": None, "help": None, "set": None, "shops": "settings", "webapp": None,
-    "tunnel": "system", "ps": None, "wdm": "withdraw", "oos": "delivery", "wm": "settings", "wmp": "settings", "status": "orders", "stats": "finance", "fin": "finance",
+    "main": None, "noop": None, "cancel": None, "about": None, "help": None, "set": None, "shops": "settings", "webapp": None,
+    "tunnel": "system", "tmode": "system", "ps": None, "wdm": "withdraw", "oos": "delivery", "wm": "settings", "wmp": "settings", "status": "orders", "stats": "finance", "fin": "finance",
     "reply": "chat", "tpl": "chat", "tps": "chat", "cust": "customers",
     "refund": "refund", "refund2": "refund", "plsent": "delivery", "manual": "delivery",
     "dlv": "products", "dadd": "products", "dnew": "delivery", "dtog": "delivery", "ddel": "delivery",
@@ -122,6 +122,7 @@ class TelegramUI:
         self._plugin_handlers: list = []   # для повторной регистрации после смены бота
         self._fail_count = 0
         self._health_started = False
+        self._sec: dict = {}  # uid → последний открытый раздел площадки
         self._hub: dict = {}  # uid → "fp"/"pl": из какой площадки открыт общий экран (для кнопки «Назад»)
         self.bot = None
         self._build()
@@ -483,35 +484,41 @@ class TelegramUI:
         return text, [[("🏠 Главное меню", "duo:main")]]
 
     def webapp_menu(self):
+        from .tunnel import MODES, PROVIDER_NAMES
         web = self.app.web
+        tm = web.tm if web else None
         url = self.app.public_url
-        tun = web.tunnel if web else {"state": "off", "error": ""}
-        mode = self.cfg.get("web.tunnel")
+        info = tm.info if tm else {"state": "off", "error": "", "provider": ""}
+        mode = self.cfg.get("web.tunnel", "none")
         local = f"http://127.0.0.1:{self.cfg.get('web.port')}"
-        state = {"ok": "🟢 работает", "starting": "🟡 запускается…", "unreachable": "🔴 не открывается",
-                 "failed": "🔴 не запустился", "off": "⚪️ выключен"}.get(tun["state"], tun["state"])
-        if tun["state"] == "off" and url:
-            state = "🔗 свой адрес — нажмите «🔄 Проверить»"
-        text = (f"<b>📱 Мини-апп</b>\n\nСостояние: {state}"
-                + (f" ({esc(tun['error'])})" if tun.get("error") and tun["state"] != "ok" else "")
-                + (f"\nАдрес: <code>{esc(url)}</code>" if url else "")
-                + f"\nНа компьютере: <code>{local}</code>\n")
-        if tun["state"] == "unreachable":
-            text += ("\n<b>Что сделать</b>\n"
-                     "1. Подождите минуту — новый адрес Cloudflare включается не сразу, потом «🔄 Проверить».\n"
-                     "2. Включите VPN на телефоне: в России адреса trycloudflare.com часто тормозят.\n"
-                     "3. Не помогло — «♻️ Новый адрес».\n")
-        elif mode != "cloudflared" and not url:
-            text += ("\nАвтоматический адрес выключен. Включите туннель Cloudflare в мастере настройки "
-                     "или укажите свой HTTPS-адрес кнопкой ниже.\n")
-        text += "\n<i>Адрес меняется при каждом запуске бота — открывайте панель кнопкой «Панель» или из /menu, "
-        text += "а не по старым сообщениям.</i>"
+        state = {"ok": "🟢 Работает", "starting": "🟡 Подключаюсь…", "unreachable": "🔴 Адрес не открывается",
+                 "failed": "🔴 Не получилось подключиться", "off": "⚪️ Выключено"}.get(info["state"], info["state"])
+        if info["state"] == "off" and url:
+            state = "🔗 Свой адрес"
+        prov = PROVIDER_NAMES.get(info.get("provider"), "")
+        text = (f"<b>📱 Приложение</b>\n\n{state}" + (f" · через {prov}" if prov and info["state"] != "off" else "")
+                + (f"\n<i>{esc(info['error'])}</i>" if info.get("error") and info["state"] != "ok" else "")
+                + f"\n\n・ 🔀 Способ: <b>{esc(MODES.get(mode, mode))}</b>"
+                + (f"\n・ 🌐 Адрес: <code>{esc(url)}</code>" if url else "")
+                + f"\n・ 💻 На этом компьютере: <code>{local}</code>")
+        if tm and tm.attempts:
+            text += "\n\n<b>Последние попытки</b>\n" + "\n".join(
+                f"・ {time.strftime('%H:%M', time.localtime(t))} {esc(n)}: {esc(r)[:70]}" for t, n, r in list(tm.attempts)[-5:])
+        if info["state"] in ("unreachable", "failed"):
+            text += ("\n\n<b>Что можно сделать</b>\n"
+                     "1. «🔁 Другой способ» — бот попробует следующий сервис.\n"
+                     "2. Включите прокси для Telegram-бота: бот пустит через него и туннель.\n"
+                     "3. На телефоне включите VPN — некоторые адреса провайдеры режут.")
+        text += "\n\n<i>Адрес меняется при перезапуске — открывайте приложение кнопкой «📱 Панель» или из /menu.</i>"
         rows = []
         if url.startswith("https://"):
-            rows.append([("📱 Открыть панель", ("webapp", url))])
-        rows += [[("🔄 Проверить", "duo:tunnel:check", "system"), ("♻️ Новый адрес", "duo:tunnel:restart", "system")],
-                 [("🔗 Свой адрес", "duo:e:web.public_url", "system"), ("🔐 Пароль панели", "duo:e:web.password", "secrets")],
-                 [("◀️ Настройки", "duo:set")]]
+            rows.append([("📱 Открыть приложение", ("webapp", url))])
+        rows += [[("🔄 Проверить", "duo:tunnel:check", "system"), ("🔁 Другой способ", "duo:tunnel:restart", "system")],
+                 [(("• " if mode == m else "") + n.split(" —")[0].split(" (")[0], f"duo:tmode:{m}", "system")
+                  for m, n in MODES.items() if m in ("auto", "cloudflared", "localhostrun", "pinggy")],
+                 [(("• " if mode == "none" else "") + "Выключить", "duo:tmode:none", "system"),
+                  ("🔗 Свой адрес", "duo:e:web.public_url", "system")],
+                 [("🔐 Пароль панели", "duo:e:web.password", "secrets"), ("⬅️ Назад", "duo:set")]]
         return text, rows
 
     def about_menu(self):
@@ -545,14 +552,26 @@ class TelegramUI:
     # ---------- площадки и аккаунты ----------
     # ═══════════════ площадка: главный экран и разделы ═══════════════
     PSECTIONS = {
-        "accs": "👤 Аккаунты", "chat": "💬 Чат и автоответы", "orders": "🛒 Заказы и выдача",
-        "raise": "⬆️ Поднятие лотов", "stats": "📊 Статистика", "wd": "💸 Вывод средств",
-        "lots": "🏷 Лоты без товара", "ntf": "🔔 Уведомления",
+        "profile": "👤 Профиль", "stats": "📊 Статистика", "chats": "💬 Чаты", "orders": "🛒 Заказы",
+        "greet": "👋 Приветствие", "cmds": "❗ Команды", "dlv": "🚀 Автовыдача", "raise": "⬆️ Поднятие",
+        "confirm": "☑️ Подтверждение", "reviews": "⭐ Отзывы", "wd": "💸 Автовывод", "lots": "🏷 Нет товара",
+        "accs": "🔑 Аккаунты и прокси", "ntf": "🔔 Уведомления",
     }
 
     def _pinfo(self, p):
         platform = "funpay" if p == "fp" else "playerok"
         return platform, ("🔵 FunPay" if p == "fp" else "🟢 Playerok"), (self.app.fp if p == "fp" else self.app.pl)
+
+    @staticmethod
+    def _ago(ts) -> str:
+        d = max(0, int(time.time() - (ts or 0)))
+        if d < 60:
+            return "только что"
+        if d < 3600:
+            return f"{d // 60} мин назад"
+        if d < 86400:
+            return f"{d // 3600} ч назад"
+        return time.strftime("%d.%m %H:%M", time.localtime(ts))
 
     def platform_menu(self, p, uid=None):
         platform, title, pool = self._pinfo(p)
@@ -564,39 +583,46 @@ class TelegramUI:
         run = [a for a in accs if a["running"]]
         on = c.get(f"{platform}.enabled")
         if not on:
-            state = "⚪️ выключена"
+            state = "⚪️ Выключено"
         elif not accs:
-            state = "🟡 нет аккаунтов"
+            state = "🟡 Нет аккаунтов — добавьте в «🔑 Аккаунты и прокси»"
         elif run and all(a["ok"] for a in run):
-            state = "🟢 работает"
+            state = "🟢 Работает"
         else:
-            state = "🔴 есть проблемы"
-        text = f"<b>{title}</b>\n{state} · {len(accs)} {plural(len(accs), 'аккаунт', 'аккаунта', 'аккаунтов')}\n"
+            state = "🔴 Есть проблемы"
+        text = f"<b>{title}</b>\n{state}\n"
         for a in accs:
             dot = "⚪️" if not a["running"] else ("🟢" if a["ok"] else "🔴")
-            bal = f" · {rub(a['balance'])}" if fin and a["running"] and isinstance(a["balance"], (int, float)) else ""
-            text += f"   {dot} {esc(a['name'])}{bal}" + (f"\n      {esc(a['error'])}" if a["error"] and not a["ok"] else "") + "\n"
+            bal = f" · <b>{rub(a['balance'])}</b>" if fin and a["running"] and isinstance(a["balance"], (int, float)) else ""
+            text += f"\n{dot} {esc(a['name'])}{bal}" + (f"\n    <i>{esc(a['error'])}</i>" if a["error"] and not a["ok"] else "")
         t = self.app.stats.today()[platform]
-        text += f"\n<b>📈 Сегодня:</b> {t['count']} {plural(t['count'], 'заказ', 'заказа', 'заказов')}"
-        text += f" · {rub(t['sum'])} · прибыль {rub(t['profit'])}\n" if fin else "\n"
-        flags = [("Автовыдача", c.get(f"{platform}.auto_delivery")), ("Автоответ", c.get(f"{platform}.auto_reply")),
-                 ("Приветствие", c.get(f"{platform}.greeting.enabled"))]
+        text += f"\n\n📈 <b>Сегодня:</b> {t['count']} {plural(t['count'], 'заказ', 'заказа', 'заказов')}"
+        if fin:
+            text += f" · {rub(t['sum'])} · прибыль {rub(t['profit'])}"
+        flags = [("автовыдача", c.get(f"{platform}.auto_delivery")), ("автоответ", c.get(f"{platform}.auto_reply")),
+                 ("приветствие", c.get(f"{platform}.greeting.enabled"))]
         if p == "fp":
-            flags.append(("Автоподнятие", c.get("funpay.auto_raise.enabled")))
-        text += "\n" + "  ".join(f"{'✅' if v else '▫️'} {n}" for n, v in flags)
+            flags.append(("поднятие", c.get("funpay.auto_raise.enabled")))
+        text += "\n⚙️ " + " · ".join(f"{'✅' if v else '❌'} {n}" for n, v in flags)
         if c.get("features.vacation.enabled"):
-            text += "\n🏖 <b>Режим отпуска включён</b>"
+            text += "\n🏖 <b>Режим отпуска</b>"
 
         S = self.PSECTIONS
-        rows = [[(S["accs"], f"duo:ps:{p}:accs", "settings"), (S["stats"], f"duo:ps:{p}:stats", "orders")],
-                [(S["chat"], f"duo:ps:{p}:chat", "settings"), (S["orders"], f"duo:ps:{p}:orders", "products")]]
+        sec = lambda k, perm=None: (S[k], f"duo:ps:{p}:{k}", perm)  # noqa: E731
+        rows = [[("━━━  📋 Управление  ━━━", "duo:noop")],
+                [sec("profile", "orders"), sec("stats", "orders")],
+                [sec("chats", "chat"), sec("orders", "orders")],
+                [("━━━  ⚙️ Автоматизация  ━━━", "duo:noop", "settings")],
+                [sec("greet", "settings"), sec("cmds", "settings")],
+                [sec("dlv", "products"), sec("raise", "settings") if p == "fp" else sec("lots", "delivery")],
+                [sec("confirm", "settings"), sec("reviews", "settings") if p == "fp" else sec("wd", "withdraw")]]
         if p == "fp":
-            rows.append([(S["raise"], "duo:ps:fp:raise", "settings"), (S["wd"], "duo:ps:fp:wd", "withdraw")])
-        else:
-            rows.append([(S["wd"], "duo:ps:pl:wd", "withdraw")])
-        rows += [[(S["lots"], f"duo:ps:{p}:lots", "delivery"), (S["ntf"], f"duo:ps:{p}:ntf", "settings")],
-                 [(f"{'🟢 Площадка включена' if on else '🔴 Площадка выключена'}", f"duo:t:{platform}.enabled:{p}", "settings")],
-                 [("⚙️ Общие настройки", "duo:set"), ("🏠 Меню", "duo:main")]]
+            rows.append([sec("wd", "withdraw"), sec("lots", "delivery")])
+        rows += [[("━━━  🔧 Прочее  ━━━", "duo:noop")],
+                 [sec("accs", "settings"), sec("ntf", "settings")],
+                 [(f"{'🟢 ' + title[2:] + ' включён' if on else '🔴 ' + title[2:] + ' выключен'}",
+                   f"duo:t:{platform}.enabled:{p}", "settings")],
+                 [("🏠 Меню", "duo:main"), ("🔄 Обновить", f"duo:{p}"), ("⚙️ Общее", "duo:set")]]
         return text, rows
 
     def platform_section(self, p, sec, uid=None):
@@ -608,86 +634,50 @@ class TelegramUI:
     def _platform_section(self, p, sec, uid=None):
         platform, title, pool = self._pinfo(p)
         c, k = self.cfg, platform
-        back = [("◀️ " + ("FunPay" if p == "fp" else "Playerok"), f"duo:{p}"), ("🏠 Меню", "duo:main")]
+        perms = self.perms(uid) if uid else perms_of("owner")
+        fin = "finance" in perms
+        back = [("⬅️ Назад", f"duo:{p}"), ("🔄 Обновить", f"duo:ps:{p}:{sec}")]
         tg = lambda path, label: (f"{onoff(c.get(path))} {label}", f"duo:t:{path}:{p}-{sec}", "settings")  # noqa: E731
+        ed = lambda path, label: (label, f"duo:e:{path}", "settings")  # noqa: E731
         head = f"<b>{title} · {self.PSECTIONS.get(sec, sec)}</b>\n\n"
+        q = lambda v, n=180: f"<blockquote>{esc(str(v or '—'))[:n]}</blockquote>"  # noqa: E731
 
-        if sec == "accs":
-            lines = []
-            for a in c.accounts(platform):
+        if sec == "profile":
+            st = self.app.status()
+            accs = [a for a in st["accounts"] if a["platform"] == platform]
+            orders = [o for o in self.app.stats.data["orders"] if o.get("p") == platform]
+            text = head
+            for a in accs:
                 svc = pool.get(a["id"])
-                stt = "⚪️ выкл" if not a.get("enabled", True) else (onoff(svc and svc.ok) if svc else "🟡 нет ключа")
-                lines.append(f"{stt} <b>{esc(self.app.account_name(a['id']))}</b>"
-                             + (f" — {esc(svc.error)}" if svc and svc.error and not svc.ok else "")
-                             + f"\n     прокси: {esc(proxy_label(a.get('proxy', '')))}")
-            text = head + ("\n".join(lines) or "Аккаунтов пока нет.") + \
-                "\n\n<i>Нажмите на аккаунт: включить/выключить, прокси, ключ, автовыдача.</i>"
-            rows = [[(f"👤 {self.app.account_name(a['id'])[:28]}", f"duo:acc:{a['id']}")] for a in c.accounts(platform)]
-            rows += [[("➕ Добавить аккаунт", f"duo:addacc:{p}", "secrets")], back]
-            return text, rows
-
-        if sec == "chat":
-            text = head + (f"👋 <b>Приветствие</b> — первое сообщение новому покупателю "
-                           f"(не чаще раза в {c.get(k + '.greeting.cooldown_days')} дн.)\n"
-                           f"<i>{esc(c.get(k + '.greeting.text'))[:150]}</i>\n\n"
-                           f"🤖 <b>Автоответ</b> — ответы на команды вида !помощь ({len(c.get('commands', []))} шт.)\n\n"
-                           f"🙏 <b>После подтверждения</b>\n<i>{esc(c.get(k + '.confirm_reply.text'))[:150]}</i>\n")
-            if p == "fp":
-                text += "\n⭐ <b>Ответ на отзывы</b> — свой текст на каждую оценку (тексты — в приложении)\n"
-            text += (f"\n🕘 Рабочие часы: {onoff(c.get('general.work_hours.enabled'))} "
-                     f"{c.get('general.work_hours.from')}–{c.get('general.work_hours.to')}  ·  "
-                     f"🏖 Отпуск: {onoff(c.get('features.vacation.enabled'))}")
-            rows = [[tg(k + ".greeting.enabled", "Приветствие"), ("✏️ Текст", f"duo:e:{k}.greeting.text")],
-                    [tg(k + ".auto_reply", "Автоответ"), ("📋 Команды", "duo:cmds")],
-                    [tg(k + ".confirm_reply.enabled", "После подтверждения"), ("✏️ Текст", f"duo:e:{k}.confirm_reply.text")]]
-            if p == "fp":
-                rows.append([tg("funpay.review_reply.enabled", "Ответ на отзывы")])
-            rows += [[tg("general.work_hours.enabled", "Рабочие часы"), ("🕘 Часы", "duo:e:general.work_hours.range")],
-                     [tg("features.vacation.enabled", "Отпуск"), ("✏️ Текст отпуска", "duo:e:features.vacation.text")],
-                     [("⏳ Пауза приветствия, дней", f"duo:e:{k}.greeting.cooldown_days")], back]
-            return text, rows
-
-        if sec == "orders":
-            rules = [r for r in c.get("delivery", []) if platform in r.get("platforms", ["funpay", "playerok"])]
-            text = head + (f"📦 <b>Автовыдача</b>: {onoff(c.get(k + '.auto_delivery'))} · правил для площадки: {len(rules)}\n")
-            for r in rules[:8]:
-                mode = r.get("mode", "file")
-                cnt = Products.count(r.get("file", "")) if mode == "file" else "∞"
-                text += f"   {onoff(r.get('enabled', True))} <code>{esc(r.get('keyword'))}</code> — осталось {cnt}\n"
-            text += (f"\n🧾 <b>Сообщение при заказе</b>: {onoff(c.get(k + '.order_text.enabled'))}\n"
-                     f"<i>{esc(c.get(k + '.order_text.text'))[:150]}</i>\n")
-            text += (f"\n⏰ Напоминание подтвердить заказ: {onoff(c.get('features.confirm_reminder.enabled'))} "
-                     f"через {c.get('features.confirm_reminder.after_hours')} ч\n"
-                     f"⭐ Приветствие постоянным покупателям: {onoff(c.get('features.returning_buyer.enabled'))}")
-            rows = [[tg(k + ".auto_delivery", "Автовыдача"), ("📦 Правила и товары", "duo:dlv", "products")],
-                    [tg(k + ".order_text.enabled", "Сообщение при заказе"), ("✏️ Текст", f"duo:e:{k}.order_text.text")],
-                    [tg("features.confirm_reminder.enabled", "Напоминание"), ("⏰ Через сколько часов", "duo:e:features.confirm_reminder.after_hours")],
-                    [tg("features.returning_buyer.enabled", "Постоянные покупатели")]]
-            if p == "fp":
-                rows.append([tg("funpay.auto_refund_no_stock", "Автовозврат, если товар кончился")])
-            else:
-                rows.append([tg("playerok.mark_sent", "Отмечать сделку отправленной")])
-            rows += [[("👥 Покупатели", "duo:cust", "customers")], back]
-            return text, rows
-
-        if sec == "raise" and p == "fp":
-            info = "\n".join(x for svc in pool.values() for x in svc.raise_info.values())
-            text = head + (f"Автоподнятие: {onoff(c.get('funpay.auto_raise.enabled'))} · проверка раз в "
-                           f"{c.get('funpay.auto_raise.check_every_min')} мин\n\n"
-                           + (f"<b>Последнее поднятие</b>\n{esc(info[-1500:])}" if info else "Ещё не поднимал."))
-            rows = [[tg("funpay.auto_raise.enabled", "Автоподнятие"), ("⬆️ Поднять сейчас", "duo:raise")],
-                    [("⏱ Интервал проверки, мин", "duo:e:funpay.auto_raise.check_every_min")], back]
+                dot = "⚪️ выключен" if not a["running"] else ("🟢 работает" if a["ok"] else "🔴 " + esc(a["error"] or "нет связи"))
+                mine = [o for o in orders if o.get("a") == a["id"]]
+                text += (f"<b>{esc(a['name'])}</b>\n"
+                         f"・ 🆔 Логин: {esc(a.get('username') or '—')}\n"
+                         f"・ 💡 Состояние: {dot}\n")
+                if fin and isinstance(a["balance"], (int, float)):
+                    text += f"・ 💰 Баланс: <b>{rub(a['balance'])}</b>\n"
+                text += f"・ 🛒 Продаж через бота: {len(mine)}\n"
+                if p == "fp" and svc:
+                    ri = list(getattr(svc, "raise_info", {}).values())
+                    if ri:
+                        text += f"・ ⬆️ Поднятие: {esc(ri[-1])[:80]}\n"
+                text += "\n"
+            if not accs:
+                text += "Аккаунтов нет. Добавьте в «🔑 Аккаунты и прокси».\n"
+            rows = [[("🔑 Аккаунты и прокси", f"duo:ps:{p}:accs", "settings")], back]
             return text, rows
 
         if sec == "stats":
             s = self.app.stats
-            fin = "finance" in self.perms(uid) if uid else True
             text = head
             for n, r in (("Сегодня", s.today()), ("7 дней", s.period(604800)), ("30 дней", s.period(2592000))):
                 x = r[platform]
-                text += f"<b>{n}</b>: {x['count']} {plural(x['count'], 'заказ', 'заказа', 'заказов')}"
-                text += (f" · {rub(x['sum'])} · прибыль <b>{rub(x['profit'])}</b>"
-                         + (f"\n   ⚠️ без себестоимости: {x['no_cost']}" if x.get("no_cost") else "") + "\n") if fin else "\n"
+                text += f"<b>{n}</b>\n・ 🛒 {x['count']} {plural(x['count'], 'заказ', 'заказа', 'заказов')}\n"
+                if fin:
+                    text += f"・ 💵 Выручка: {rub(x['sum'])}\n・ 💰 Прибыль: <b>{rub(x['profit'])}</b>\n"
+                    if x.get("no_cost"):
+                        text += f"・ ⚠️ Без себестоимости: {x['no_cost']}\n"
+                text += "\n"
             agg = {}
             for o in s.data["orders"]:
                 if o.get("p") == platform and not o.get("refunded"):
@@ -696,14 +686,156 @@ class TelegramUI:
                     a[1] += s.profit_of(o)
             top = sorted(agg.items(), key=lambda kv: -kv[1][1])[:5]
             if top:
-                text += "\n<b>Самое прибыльное</b>\n" + "\n".join(
-                    f"• {esc(t[:38])} — {v[0]} шт" + (f" · {rub(round(v[1], 2))}" if fin else "") for t, v in top)
+                text += "<b>🏆 Самое прибыльное</b>\n" + "\n".join(
+                    f"・ {esc(t[:36])} — {v[0]} шт" + (f" · {rub(round(v[1], 2))}" if fin else "") for t, v in top)
             if fin:
-                text += f"\n\nКомиссия площадки в расчётах: {float(c.get('finance.commission.' + platform) or 0):g}%"
-            rows = [[("💰 Общие финансы", "duo:fin", "finance"), ("👥 Покупатели", "duo:cust", "customers")]]
-            if fin:
-                rows.append([("% Комиссия площадки", f"duo:e:finance.commission.{platform}", "finance")])
+                text += f"\n\n<i>Комиссия площадки в расчётах: {float(c.get('finance.commission.' + platform) or 0):g}%</i>"
+            rows = [[("💰 Общие финансы", "duo:fin", "finance"), ("👥 Покупатели", "duo:cust", "customers")],
+                    [("% Комиссия", f"duo:e:finance.commission.{platform}", "finance")], back]
+            return text, rows
+
+        if sec == "chats":
+            seen, items = set(), []
+            for e in reversed(list(self.app.events)):
+                if e.get("kind") != "message" or e.get("platform") != platform or e.get("system"):
+                    continue
+                key = (e.get("account"), e.get("chat_id"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                items.append(e)
+                if len(items) >= 8:
+                    break
+            text = head
+            rows = []
+            if not items:
+                text += "Новых сообщений с момента запуска бота пока нет.\nВсе чаты с историей — в 📱 приложении."
+            for e in items:
+                who = e.get("chat_name") or e.get("author") or "?"
+                arrow = "↗️ вы" if e.get("by_me") else "💬"
+                text += (f"<b>{esc(who)}</b> · {self._ago(e.get('time'))}\n"
+                         f"{arrow}: {esc((e.get('text') or '')[:90])}\n\n")
+                rows.append([(f"↩️ {who[:22]}", f"duo:reply:{e.get('account')}:{e.get('chat_id')}", "chat"),
+                             ("📝", f"duo:tpl:{e.get('account')}:{e.get('chat_id')}", "chat")])
+            url = self.app.public_url
+            if url.startswith("https://"):
+                rows.append([("📱 Все чаты в приложении", ("webapp", url))])
             rows.append(back)
+            return text, rows
+
+        if sec == "orders":
+            orders = [o for o in self.app.stats.data["orders"] if o.get("p") == platform][-8:][::-1]
+            text = head
+            rows = []
+            if not orders:
+                text += "Заказов пока нет. Они появятся здесь, как только кто-то купит."
+            for o in orders:
+                mark = "↩️ возврат" if o.get("refunded") else ("✅ выдан" if o.get("delivered") else "⏳ ждёт")
+                money = f" · {rub(o.get('price'))}" if fin else ""
+                text += (f"<code>#{esc(o['id'])}</code> · {self._ago(o.get('t'))} · {mark}\n"
+                         f"{esc(o.get('title', '')[:60])}\n👤 {esc(o.get('buyer') or '?')}{money}\n\n")
+                if p == "fp" and not o.get("refunded"):
+                    rows.append([(f"💸 Вернуть #{o['id']}", f"duo:refund:{o.get('a') or 'fp'}:{o['id']}", "refund")])
+            rows = rows[:4] + [back]
+            return text, rows
+
+        if sec == "greet":
+            text = head + (f"Первое сообщение новому покупателю. Не чаще раза в "
+                           f"{c.get(k + '.greeting.cooldown_days')} дн. одному человеку.\n"
+                           f"<b>Приветствие</b> {onoff(c.get(k + '.greeting.enabled'))}\n{q(c.get(k + '.greeting.text'))}"
+                           f"<b>Постоянным покупателям</b> {onoff(c.get('features.returning_buyer.enabled'))}\n"
+                           f"{q(c.get('features.returning_buyer.text'))}"
+                           f"<b>Нерабочее время</b> {onoff(c.get('general.work_hours.enabled'))} "
+                           f"{c.get('general.work_hours.from')}–{c.get('general.work_hours.to')}\n"
+                           f"{q(c.get('general.work_hours.away_text'))}"
+                           f"<b>Отпуск</b> {onoff(c.get('features.vacation.enabled'))}\n{q(c.get('features.vacation.text'))}"
+                           f"<i>Переменные: $username, $orders_count, $vacation_until</i>")
+            rows = [[tg(k + ".greeting.enabled", "Приветствие"), ed(k + ".greeting.text", "✏️ Текст")],
+                    [ed(k + ".greeting.cooldown_days", "⏳ Раз в сколько дней")],
+                    [tg("features.returning_buyer.enabled", "Постоянным"), ed("features.returning_buyer.text", "✏️ Текст")],
+                    [tg("general.work_hours.enabled", "Нерабочее время"), ed("general.work_hours.range", "🕘 Часы")],
+                    [ed("general.work_hours.away_text", "✏️ Текст нерабочего времени")],
+                    [tg("features.vacation.enabled", "Отпуск"), ed("features.vacation.text", "✏️ Текст")],
+                    [ed("features.vacation.until", "📅 Отпуск до даты")], back]
+            return text, rows
+
+        if sec == "cmds":
+            cmds = [x for x in c.get("commands", []) if platform in x.get("platforms", ["funpay", "playerok"])]
+            text = head + (f"Автоответ {onoff(c.get(k + '.auto_reply'))} — бот отвечает на сообщения покупателя, "
+                           f"которые совпадают с командой.\n\n")
+            for x in cmds:
+                text += f"<code>{esc(x['trigger'])}</code>{' 🔔' if x.get('notify') else ''}\n{q(x.get('text'), 120)}"
+            if not cmds:
+                text += "Команд пока нет.\n"
+            text += "\n<i>🔔 — заодно позвать вас в Telegram</i>"
+            rows = [[tg(k + ".auto_reply", "Автоответ"), ("📋 Изменить команды", "duo:cmds", "settings")],
+                    [("📝 Мои шаблоны ответов", "duo:e:templates", "settings")], back]
+            return text, rows
+
+        if sec == "dlv":
+            rules = [r for r in c.get("delivery", []) if platform in r.get("platforms", ["funpay", "playerok"])]
+            text = head + f"Автовыдача {onoff(c.get(k + '.auto_delivery'))} — ключевое слово в названии заказа → товар.\n\n"
+            for r in rules[:10]:
+                mode = r.get("mode", "file")
+                cnt = Products.count(r.get("file", "")) if mode == "file" else "∞"
+                src = {"file": "из файла", "supplier": "у поставщика", "text": "текст"}.get(mode, mode)
+                text += f"{onoff(r.get('enabled', True))} <code>{esc(r.get('keyword'))}</code> · {src} · осталось <b>{cnt}</b>\n"
+            if not rules:
+                text += "Правил пока нет — нажмите «📦 Правила и товары».\n"
+            text += (f"\n<b>Сообщение при заказе</b> {onoff(c.get(k + '.order_text.enabled'))}\n"
+                     f"{q(c.get(k + '.order_text.text'))}")
+            rows = [[tg(k + ".auto_delivery", "Автовыдача"), ("📦 Правила и товары", "duo:dlv", "products")],
+                    [tg(k + ".order_text.enabled", "Сообщение при заказе"), ed(k + ".order_text.text", "✏️ Текст")]]
+            rows.append([tg("funpay.auto_refund_no_stock", "Возврат, если товар кончился")] if p == "fp"
+                        else [tg("playerok.mark_sent", "Отмечать сделку отправленной")])
+            rows.append(back)
+            return text, rows
+
+        if sec == "raise" and p == "fp":
+            info = [x for svc in pool.values() for x in svc.raise_info.values()]
+            text = head + (f"Автоподнятие {onoff(c.get('funpay.auto_raise.enabled'))} · проверка раз в "
+                           f"{c.get('funpay.auto_raise.check_every_min')} мин\n"
+                           f"FunPay разрешает поднимать каждую категорию раз в несколько часов — бот делает это сам, "
+                           f"как только можно.\n\n"
+                           + ("<b>Последние поднятия</b>\n" + "\n".join(f"・ {esc(x)[:90]}" for x in info[-8:])
+                              if info else "Ещё не поднимал."))
+            rows = [[tg("funpay.auto_raise.enabled", "Автоподнятие"), ("⬆️ Поднять сейчас", "duo:raise", "settings")],
+                    [ed("funpay.auto_raise.check_every_min", "⏱ Интервал проверки, мин")], back]
+            return text, rows
+
+        if sec == "confirm":
+            text = head + (f"<b>Спасибо после подтверждения</b> {onoff(c.get(k + '.confirm_reply.enabled'))}\n"
+                           f"{q(c.get(k + '.confirm_reply.text'))}"
+                           f"<b>Напомнить подтвердить</b> {onoff(c.get('features.confirm_reminder.enabled'))} · через "
+                           f"{c.get('features.confirm_reminder.after_hours')} ч\n{q(c.get('features.confirm_reminder.text'))}"
+                           f"<i>Переменные: $username, $order_id, $order_title</i>")
+            rows = [[tg(k + ".confirm_reply.enabled", "Спасибо"), ed(k + ".confirm_reply.text", "✏️ Текст")],
+                    [tg("features.confirm_reminder.enabled", "Напоминание"), ed("features.confirm_reminder.text", "✏️ Текст")],
+                    [ed("features.confirm_reminder.after_hours", "⏰ Через сколько часов")], back]
+            return text, rows
+
+        if sec == "reviews" and p == "fp":
+            texts = c.get("funpay.review_reply.texts", {})
+            text = head + f"Ответ на отзыв {onoff(c.get('funpay.review_reply.enabled'))} — свой текст на каждую оценку.\n\n"
+            for star in ("5", "4", "3", "2", "1"):
+                text += f"{'⭐' * int(star)}\n{q(texts.get(star), 120)}"
+            rows = [[tg("funpay.review_reply.enabled", "Отвечать на отзывы")],
+                    [ed(f"funpay.review_reply.texts.{st}", f"✏️ {st}⭐") for st in ("5", "4", "3")],
+                    [ed(f"funpay.review_reply.texts.{st}", f"✏️ {st}⭐") for st in ("2", "1")], back]
+            return text, rows
+
+        if sec == "accs":
+            lines = []
+            for a in c.accounts(platform):
+                svc = pool.get(a["id"])
+                stt = "⚪️ выкл" if not a.get("enabled", True) else (onoff(svc and svc.ok) if svc else "🟡 нет ключа")
+                lines.append(f"{stt} <b>{esc(self.app.account_name(a['id']))}</b>"
+                             + (f" — {esc(svc.error)}" if svc and svc.error and not svc.ok else "")
+                             + f"\n    🌐 {esc(proxy_label(a.get('proxy', '')))}")
+            text = head + ("\n".join(lines) or "Аккаунтов пока нет.") + \
+                "\n\n<i>Нажмите на аккаунт: вкл/выкл, прокси, ключ, автовыдача. Применяется сразу.</i>"
+            rows = [[(f"👤 {self.app.account_name(a['id'])[:28]}", f"duo:acc:{a['id']}")] for a in c.accounts(platform)]
+            rows += [[("➕ Добавить аккаунт", f"duo:addacc:{p}", "secrets")], back]
             return text, rows
 
         if sec == "wd":
@@ -711,13 +843,15 @@ class TelegramUI:
             mode = w.get("mode", "off")
             paused = self.app.withdraw.paused(platform)
             names = {"off": "выключен", "ask": "спрашивать меня", "auto": "автоматически"}
+            meth = w.get("method") or w.get("provider")
             text = head + (f"Режим: <b>{names.get(mode, mode)}</b>\n"
-                           f"Куда: {esc(METHOD_NAMES.get(w.get('method') or w.get('provider'), w.get('method') or w.get('provider') or '—'))}"
-                           f" {mask_wallet(w.get('wallet')) if w.get('wallet') else '(реквизиты не указаны)'}\n"
-                           f"Выводить, когда баланс ≥ {rub(w.get('threshold', 0))}, оставлять {rub(w.get('keep', 0))}\n"
-                           f"Мин. сумма {rub(w.get('min_amount', 0))} · не больше {rub(w.get('max_per_day', 0))} в день"
+                           f"・ 💳 Куда: {esc(METHOD_NAMES.get(meth, meth or '—'))} "
+                           f"{mask_wallet(w.get('wallet')) if w.get('wallet') else '<i>(реквизиты не указаны)</i>'}\n"
+                           f"・ 💰 Выводить, когда баланс ≥ {rub(w.get('threshold', 0))}\n"
+                           f"・ 🏦 Оставлять на балансе {rub(w.get('keep', 0))}\n"
+                           f"・ ⬇️ Мин. сумма {rub(w.get('min_amount', 0))} · 📅 до {rub(w.get('max_per_day', 0))} в день"
                            + (f"\n\n⏸ <b>На паузе:</b> {esc(paused)}" if paused else "")
-                           + "\n\n<i>Реквизиты указываются в приложении — так безопаснее.</i>")
+                           + "\n\n<i>Реквизиты указываются в 📱 приложении — так безопаснее.</i>")
             nxt = {"off": "ask", "ask": "auto", "auto": "off"}[mode if mode in names else "off"]
             rows = [[(f"🔁 Режим: {names.get(mode, mode)}", f"duo:wdm:{p}:{nxt}", "withdraw"),
                      ("💸 Вывести сейчас", f"duo:wdnow:{platform}", "withdraw")],
@@ -734,17 +868,17 @@ class TelegramUI:
             o = c.get("features.out_of_stock", {})
             names = {"off": "ничего не делать", "notify": "только сообщить", "ask": "спросить меня", "auto": "скрывать сразу"}
             rn = {"off": "ничего", "ask": "спросить меня", "auto": "показывать сразу"}
-            text = head + (f"Когда в файле автовыдачи заканчивается товар, лот можно скрыть, чтобы не продавать пустое.\n\n"
-                           f"Товар закончился: <b>{names.get(o.get('mode'), o.get('mode'))}</b>\n"
-                           f"Товар снова появился: <b>{rn.get(o.get('restore'), o.get('restore'))}</b>\n"
-                           f"Уведомлять, когда осталось ≤ {c.get('features.low_stock.threshold')} шт: "
+            text = head + (f"Когда в файле автовыдачи кончается товар, лот можно скрыть, чтобы не продавать пустое.\n\n"
+                           f"・ 📭 Товар кончился: <b>{names.get(o.get('mode'), o.get('mode'))}</b>\n"
+                           f"・ 📬 Товар снова есть: <b>{rn.get(o.get('restore'), o.get('restore'))}</b>\n"
+                           f"・ 📉 Сообщить, когда осталось ≤ {c.get('features.low_stock.threshold')} шт: "
                            f"{onoff(c.get('features.low_stock.enabled'))}\n\n"
-                           f"<i>Настройка общая для обеих площадок. Какие лоты к какому товару — в приложении (Товары → лоты).</i>")
+                           f"<i>Общее для обеих площадок. Какие лоты к какому товару — в 📱 приложении.</i>")
             m1 = {"off": "notify", "notify": "ask", "ask": "auto", "auto": "off"}.get(o.get("mode"), "ask")
             m2 = {"off": "ask", "ask": "auto", "auto": "off"}.get(o.get("restore"), "ask")
-            rows = [[(f"🔁 Закончился: {names.get(o.get('mode'), '?')}", f"duo:oos:{p}:mode:{m1}", "delivery")],
-                    [(f"🔁 Появился: {rn.get(o.get('restore'), '?')}", f"duo:oos:{p}:restore:{m2}", "delivery")],
-                    [tg("features.low_stock.enabled", "Мало товара"), ("📉 Порог", "duo:e:features.low_stock.threshold")],
+            rows = [[(f"🔁 Кончился: {names.get(o.get('mode'), '?')}", f"duo:oos:{p}:mode:{m1}", "delivery")],
+                    [(f"🔁 Снова есть: {rn.get(o.get('restore'), '?')}", f"duo:oos:{p}:restore:{m2}", "delivery")],
+                    [tg("features.low_stock.enabled", "Мало товара"), ed("features.low_stock.threshold", "📉 Порог")],
                     back]
             return text, rows
 
@@ -753,7 +887,7 @@ class TelegramUI:
             text = head + "О чём присылать сообщения по этой площадке:"
             nm = lambda x: NOTIFY_NAMES[x].split(" ", 1)[1].capitalize()  # noqa: E731
             rows = [[tg(f"telegram.notify.{x}", nm(x)) for x in keys[i:i + 2]] for i in range(0, len(keys), 2)]
-            rows += [[("🔔 Все уведомления", "duo:ntf")], back]
+            rows += [[("🔔 Все уведомления бота", "duo:ntf", "settings")], back]
             return text, rows
         return head + "Раздел не найден", [back]
 
@@ -1483,9 +1617,14 @@ class TelegramUI:
             if key == "web.public_url":
                 self.app.public_url = text
                 self.setup_menu_button()
-        hub = self._hub.get(uid)
-        self.send(m.chat.id, "✅ Сохранено", [[("◀️ " + ("FunPay" if hub == "fp" else "Playerok"), f"duo:{hub}")] if hub
-                                              else [("◀️ Меню", "duo:main")]], uid)
+        hub, sec = self._hub.get(uid), self._sec.get(uid)
+        if hub and sec:
+            t, r = self.platform_section(hub, sec, uid)
+            self.send(m.chat.id, "✅ Сохранено\n\n" + t, r, uid)
+        elif hub:
+            self.send(m.chat.id, "✅ Сохранено", [[("⬅️ " + ("FunPay" if hub == "fp" else "Playerok"), f"duo:{hub}")]], uid)
+        else:
+            self.send(m.chat.id, "✅ Сохранено", [[("🏠 Меню", "duo:main")]], uid)
 
     def _back(self, uid) -> str:
         return self._hub.get(uid, "main")
@@ -1500,13 +1639,31 @@ class TelegramUI:
                    "cust": self.customers_menu, "team": self.team_menu, "wm": self.watermark_menu,
                    "about": self.about_menu, "shops": self.shops_menu, "help": self.help_menu,
                    "webapp": self.webapp_menu}
+        if a == "noop":
+            bot.answer_callback_query(c.id)
+            return
         if a in ("cmds", "dlv"):
             screens[a] = (lambda f, b: (lambda: f(b)))(screens[a], self._back(uid))
         if a == "main":
             self._hub.pop(uid, None)
+            self._sec.pop(uid, None)
             self.edit(c, *self.main_menu(uid))
         elif a == "set":
             self.edit(c, *self.settings_menu(uid))
+        elif a == "tmode":
+            m = parts[2]
+            self.cfg.set("web.tunnel", m)
+            web = self.app.web
+            if web and web.tm:
+                if m == "none":
+                    web.tm.stop()
+                    web.tm.info.update(state="off", provider="", error="")
+                else:
+                    web.tm.reset()
+            from .tunnel import MODES
+            bot.answer_callback_query(c.id, f"Способ: {MODES.get(m, m).split(' —')[0]}")
+            self.edit(c, *self.webapp_menu())
+            return
         elif a == "tunnel":
             web = self.app.web
             if not web:
@@ -1514,7 +1671,7 @@ class TelegramUI:
                 return
             if parts[2] == "restart":
                 web.restart_tunnel()
-                bot.answer_callback_query(c.id, "Получаю новый адрес… Через минуту придёт сообщение.")
+                bot.answer_callback_query(c.id, "Пробую другой способ… Когда заработает — пришлю сообщение.")
             else:
                 bot.answer_callback_query(c.id, "Проверяю…")
                 web.check_tunnel()
@@ -1526,9 +1683,11 @@ class TelegramUI:
             self.edit(c, *self.finance_menu(uid))
         elif a in ("fp", "pl"):
             self._hub[uid] = a
+            self._sec.pop(uid, None)
             self.edit(c, *self.platform_menu(a, uid))
         elif a == "ps":
             self._hub[uid] = parts[2]
+            self._sec[uid] = parts[3]
             self.edit(c, *self.platform_section(parts[2], parts[3], uid))
         elif a == "wdm":
             p, mode = parts[2], parts[3]
@@ -1593,8 +1752,10 @@ class TelegramUI:
             else:
                 cur = self.cfg.get(key)
                 show = "" if key.endswith(SECRET_EDIT) or not isinstance(cur, str) else f"\nСейчас: <code>{esc(cur)}</code>"
-                hint = hints.get(key, f"Новое значение для <code>{key}</code>{show}\n"
-                                      f"Переменные: $username $order_id $order_title $product $date")
+                num = isinstance(cur, (int, float)) and not isinstance(cur, bool)
+                hint = hints.get(key, ("✏️ Пришлите новое " + ("число" if num else "значение") + " одним сообщением."
+                                       + show + ("" if num else "\n\n<i>Можно использовать: $username $order_id "
+                                                                   "$order_title $product $date</i>")))
             self.ask(cid, uid, "duo_edit", hint, {"key": key})
         elif a == "wmp":
             self.cfg.set("general.watermark", WATERMARK_PRESETS[int(parts[2])])

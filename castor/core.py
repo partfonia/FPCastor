@@ -274,6 +274,11 @@ class Config:
         before = json.dumps(d, sort_keys=True)
         canon_config_proxies(d)  # прокси в любом виде → единый формат
         changed = json.dumps(d, sort_keys=True) != before
+        w = d.setdefault("web", {})
+        if w.get("tunnel") == "cloudflared" and not w.get("tunnel_v2"):
+            w["tunnel"], changed = "auto", True  # 2.4: сам выбирает Cloudflare / localhost.run / Pinggy
+        if not w.get("tunnel_v2"):
+            w["tunnel_v2"], changed = True, True
         acc = d.setdefault("accounts", {"funpay": [], "playerok": []})
         if not acc.get("funpay") and d["funpay"].get("golden_key"):
             acc["funpay"] = [{"id": "fp1", "name": "Основной", "enabled": True,

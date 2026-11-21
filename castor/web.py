@@ -7,10 +7,7 @@ import hmac
 import json
 import mimetypes
 import os
-import platform
 import re
-import shutil
-import subprocess
 import threading
 import time
 import traceback
@@ -59,8 +56,7 @@ class WebServer:
         self.app = app
         self.sessions: dict = {}
         self.httpd = None
-        self.tunnel_proc = None
-        self.tunnel = {"state": "off", "error": "", "checked": 0}  # off · starting · ok · unreachable · failed
+        self.tm = None  # TunnelManager
         self._fails: dict = {}
 
     def start(self):
@@ -72,125 +68,35 @@ class WebServer:
             return
         threading.Thread(target=self.httpd.serve_forever, name="web", daemon=True).start()
         log.info("🌐 Веб-панель: http://127.0.0.1:%s", port)
-        if self.app.cfg.get("web.tunnel") == "cloudflared":
-            self.start_tunnel(port)
+        from .tunnel import TunnelManager
+        self.tm = TunnelManager(self.app, port)
+        self.tm.start()
 
     def stop(self):
         try:
             if self.httpd:
                 self.httpd.shutdown()
-            if self.tunnel_proc:
-                self.tunnel_proc.terminate()
+            if self.tm:
+                self.tm.stop()
         except Exception:
             pass
 
-    # ═════════ туннель cloudflared — бесплатный HTTPS для мини-аппа ═════════
-    def _cloudflared_bin(self) -> Optional[str]:
-        found = shutil.which("cloudflared")
-        if found:
-            return found
-        sysname, mach = platform.system().lower(), platform.machine().lower()
-        arch = "arm64" if mach in ("aarch64", "arm64") else ("arm" if mach.startswith("arm") else "amd64")
-        base = "https://github.com/cloudflare/cloudflared/releases/latest/download/"
-        if sysname == "windows":
-            fname, url = "cloudflared.exe", base + f"cloudflared-windows-{arch}.exe"
-        elif sysname == "linux":
-            fname, url = "cloudflared", base + f"cloudflared-linux-{arch}"
-        else:
-            log.warning("cloudflared: установите вручную (brew install cloudflared)")
-            return None
-        dst = BIN_DIR / fname
-        if not dst.exists():
-            log.info("⬇️ Скачиваю cloudflared…")
-            try:
-                with requests.get(url, stream=True, timeout=60) as r:
-                    r.raise_for_status()
-                    with open(dst, "wb") as f:
-                        for chunk in r.iter_content(1 << 16):
-                            f.write(chunk)
-                dst.chmod(0o755)
-            except Exception as e:
-                log.error("cloudflared: не скачался: %s", e)
-                dst.unlink(missing_ok=True)
-                return None
-        return str(dst)
+    # ═════════ туннель: бесплатный HTTPS-адрес для мини-аппа (см. tunnel.py) ═════════
+    @property
+    def tunnel(self) -> dict:
+        return self.tm.info if self.tm else {"state": "off", "error": "", "provider": ""}
 
-    def start_tunnel(self, port):
-        def run():
-            self.tunnel.update(state="starting", error="")
-            binp = self._cloudflared_bin()
-            if not binp:
-                self.tunnel.update(state="failed", error="cloudflared не скачался — проверьте интернет")
-                return
-            while self.app.running:
-                try:
-                    self.tunnel.update(state="starting", error="")
-                    self.tunnel_proc = subprocess.Popen(
-                        [binp, "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{port}"],
-                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                        errors="replace", **({"creationflags": 0x08000000} if os.name == "nt" else {}))
-                    for line in self.tunnel_proc.stdout:
-                        m = re.search(r"https://[a-z0-9\-]+\.trycloudflare\.com", line)
-                        if m and m.group(0) != self.app.public_url:
-                            self.app.public_url = m.group(0)
-                            threading.Thread(target=self._announce, daemon=True).start()
-                    self.tunnel_proc.wait()
-                except Exception as e:
-                    log.error("cloudflared: %s", e)
-                if self.app.running:
-                    self.tunnel.update(state="starting", error="туннель перезапускается")
-                    log.warning("cloudflared завершился, перезапуск через 10 с")
-                    time.sleep(10)
-        threading.Thread(target=run, name="tunnel", daemon=True).start()
-
-    def check_tunnel(self, attempts=1, pause=5) -> bool:
-        """Открывается ли мини-апп снаружи (через адрес туннеля)."""
-        url = self.app.public_url
-        if not url.startswith("https://"):
-            self.tunnel.update(state="off" if not url else "failed", error="нет HTTPS-адреса")
-            return False
-        err = ""
-        for i in range(attempts):
-            try:
-                r = requests.get(url + "/api/health", timeout=10)
-                if r.ok and r.json().get("ok"):
-                    self.tunnel.update(state="ok", error="", checked=time.time())
-                    return True
-                err = f"ответ {r.status_code}"
-            except requests.Timeout:
-                err = "не ответил за 10 с"
-            except Exception:
-                err = "не удалось подключиться"
-            if i < attempts - 1:
-                time.sleep(pause)
-        self.tunnel.update(state="unreachable", error=err, checked=time.time())
-        return False
-
-    def _announce(self):
-        """Новый адрес: ждём, пока туннель реально заработает, и только потом ставим кнопку."""
-        url = self.app.public_url
-        ok = self.check_tunnel(attempts=12, pause=5)  # Cloudflare публикует адрес до минуты
-        if url != self.app.public_url:
-            return
-        if self.app.tg:
-            self.app.tg.setup_menu_button()
-        if ok:
-            log.info("📱 Мини-апп работает: %s", url)
-            self.app.notify("start", "📱 <b>Мини-апп готов.</b> Открывайте кнопкой «Панель» слева от поля ввода "
-                                     "или из меню /menu.\n<i>При каждом запуске адрес новый — старые кнопки не работают.</i>",
-                            buttons=[[("📱 Открыть панель", ("webapp", url))]])
-        else:
-            log.warning("📱 Мини-апп: адрес %s не открывается (%s). Если вы в России — Cloudflare может "
-                        "тормозиться провайдером, включите VPN на телефоне.", url, self.tunnel["error"])
+    def check_tunnel(self) -> bool:
+        return self.tm.check() if self.tm else False
 
     def restart_tunnel(self):
-        self.app.public_url = ""
-        self.tunnel.update(state="starting", error="")
-        try:
-            if self.tunnel_proc:
-                self.tunnel_proc.terminate()
-        except Exception:
-            pass
+        if self.tm:
+            if self.tm.mode == "none":
+                return
+            if self.tm._thread and self.tm._thread.is_alive():
+                self.tm.next()
+            else:
+                self.tm.start()
 
     # ═════════ сессии и права ═════════
     def new_session(self, uid, role):

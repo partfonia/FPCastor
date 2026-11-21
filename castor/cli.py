@@ -449,13 +449,13 @@ def _step_webapp(cfg: Config, n: int):
     step(n, TOTAL, "📱 Мини-апп и веб-панель",
          "Панель со статистикой и всеми настройками: открывается кнопкой в Telegram-боте или в браузере.")
     c = choose("Как открывать панель?", [
-        ("Из Telegram через бесплатный адрес Cloudflare", "бот сам скачает cloudflared и получит HTTPS-адрес — ничего настраивать не нужно"),
+        ("Из Telegram — бот сам получит бесплатный адрес", "пробует Cloudflare, localhost.run и Pinggy, в том числе через прокси бота, и берёт рабочий"),
         ("Из Telegram через свой домен", "если у вас есть сервер с доменом и HTTPS"),
         ("Только в браузере на этом компьютере", "http://127.0.0.1:" + str(w.get("port", 8765))),
         ("Не нужна", "всё управление — кнопками в Telegram-боте"),
     ], default=1)
     w["enabled"] = c != 4
-    w["tunnel"] = "cloudflared" if c == 1 else "none"
+    w["tunnel"] = "auto" if c == 1 else "none"
     if c == 2:
         w["public_url"] = ask_text("Адрес панели (https://…)", w.get("public_url", ""))
     if w["enabled"] and not w.get("password"):
@@ -476,7 +476,8 @@ def _step_summary(cfg: Config, n: int):
         ("Telegram", ("бот подключён" + (f", владелец {owner.get('name') or owner['id']}" if owner else ""))
          if t.get("enabled") and t.get("token") else f"{D}выключен{R}"),
         ("Прокси Telegram", proxy_label(t["proxy"]["list"][0]) if t["proxy"].get("enabled") and t["proxy"].get("list") else "без прокси"),
-        ("Панель", {"cloudflared": "Telegram + Cloudflare"}.get(w.get("tunnel"), w.get("public_url") or "в браузере")
+        ("Панель", {"auto": "Telegram, адрес подберётся сам", "cloudflared": "Telegram + Cloudflare"}.get(
+            w.get("tunnel"), w.get("public_url") or "в браузере")
          if w.get("enabled") else f"{D}выключена{R}"),
     ]
     for k, v in rows:

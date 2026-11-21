@@ -404,7 +404,7 @@ class TelegramUI:
                  [("✅ Ответ на подтверждение", "duo:sec:confirm", "settings")],
                  [("⭐ Ответ на отзывы", "duo:sec:reviews", "settings")],
                  [("📊 Статистика", "duo:fin", "finance")],
-                 [("🧩 Модули: аренда, коды с почты, автоцена…", "duo:mods", "settings")],
+                 [("🧩 Плагины: аренда, коды с почты, автоцена…", "duo:mods", "settings")],
                  [("Далее ▶️", "duo:m2")]]
         return text, rows
 
@@ -421,8 +421,7 @@ class TelegramUI:
                 [("🌐 Бот и прокси", "duo:prx", "system")],
                 [("📱 Доступ к панели", "duo:webapp", "system")],
                 [("👨‍💼 Команда", "duo:team", "users")],
-                [("🧩 Плагины", "duo:plg:0", "plugins")],
-                [("🔑 Лицензии платных плагинов", "duo:lic", "secrets")],
+                [("🧩 Плагины", "duo:mods", "settings"), ("🔑 Лицензии", "duo:lic", "secrets")],
                 [("🗳 Логи", "duo:logs", "system"), ("💾 Бекап", "duo:backup", "secrets"),
                  ("🔄 Перезапуск", "duo:restart", "system")],
                 [("◀️ Назад", "duo:main:1")]]
@@ -552,8 +551,9 @@ class TelegramUI:
     def mods_menu(self):
         mods = self.app.modules.describe()
         on = sum(1 for d in mods if d["enabled"])
-        text = (f"<b>🧩 Модули</b>\n\nДополнительные функции — как плагины, но уже встроены. "
-                f"Включено {on} из {len(mods)}.\nНажмите на модуль: описание, настройки, включение.")
+        extra = [i for i in self.app.plugins.plugins.values() if not getattr(i, "module_key", None)]
+        text = (f"<b>🧩 Плагины</b>\n\nВключено {on} из {len(mods)}. Нажмите на плагин — там описание, "
+                f"настройки и кнопка включения.\n\n📥 Свой плагин: просто отправьте .py файл в этот чат.")
         rows = []
         groups = list(self.MOD_GROUPS) + sorted({d["group"] for d in mods} - set(self.MOD_GROUPS))
         for g in groups:
@@ -564,20 +564,25 @@ class TelegramUI:
             for k in range(0, len(items), 2):
                 rows.append([(f"{d['icon']} {d['name']}{' ✅' if d['enabled'] else ''}", f"duo:mod:{d['key']}", "settings")
                              for d in items[k:k + 2]])
-        rows.append([("🔌 Свои плагины", "duo:plg:0", "plugins")])
+        if extra:
+            rows.append([("━━  Установленные вами  ━━", "duo:noop")])
+            for k in range(0, len(extra), 2):
+                rows.append([(f"📥 {i.name[:24]}{' ✅' if self.app.plugins.enabled(i.uuid) else ''}", f"duo:pi:{i.uuid}", "plugins")
+                             for i in extra[k:k + 2]])
+        rows.append([("📂 Файлы плагинов", "duo:plg:0", "plugins"), ("🔑 Лицензии", "duo:lic", "secrets")])
         rows.append([("◀️ Назад", "duo:main")])
         return text, rows
 
     def mod_card(self, key):
         m = self.app.modules.get(key)
         if not m:
-            return "Модуль не найден", [[("◀️ Модули", "duo:mods")]]
+            return "Плагин не найден", [[("◀️ Плагины", "duo:mods")]]
         cfg = m.cfg
         text = (f"<b>{m.ICON} {esc(m.NAME)}</b> {'🟢 включён' if m.enabled else '⚪️ выключен'}\n\n{esc(m.DESCRIPTION)}\n")
         st = self.app.modules._safe(m, "status")
         if st:
             text += f"\n📊 <b>Сейчас:</b> {esc(st)}\n"
-        rows = [[(f"{'🔴 Выключить' if m.enabled else '🟢 Включить'} модуль", f"duo:t:modules.{key}.enabled:mod-{key}", "settings")]]
+        rows = [[(f"{'🔴 Выключить' if m.enabled else '🟢 Включить'} плагин", f"duo:t:modules.{key}.enabled:mod-{key}", "settings")]]
         items_note = []
         for f in m.FIELDS:
             path, label, typ = f[0], f[1], f[2]
@@ -600,14 +605,14 @@ class TelegramUI:
                 n = len(val or [])
                 items_note.append(f"{label}: {n}")
         if items_note:
-            text += "\n<b>Списки</b> (удобнее настраивать в 📱 панели → Настройки → Модули):\n" + \
+            text += "\n<b>Списки</b> (удобнее настраивать в 📱 панели → Настройки → Плагины):\n" + \
                 "\n".join(f"・ {esc(x)}" for x in items_note) + "\n"
             url = self.app.public_url
             if url.startswith("https://"):
                 rows.append([("📱 Настроить в панели", ("webapp", url))])
         for aid, label in (self.app.modules._safe(m, "actions") or []):
             rows.append([(label, f"duo:mod:{key}:act:{aid}"[:64], "settings")])
-        rows.append([("◀️ Модули", "duo:mods")])
+        rows.append([("◀️ Плагины", "duo:mods")])
         return text, rows
 
     def lic_menu(self):
@@ -661,7 +666,7 @@ class TelegramUI:
         rows = [[("✨ Функции", "duo:feat", "settings"), ("🔔 Уведомления", "duo:ntf", "settings")],
                 [("🕘 Работа", "duo:gen", "settings"), ("✍️ Подпись", "duo:wm", "settings")],
                 [("🤖 Бот и прокси", "duo:prx", "system"), ("📱 Мини-апп", "duo:webapp")],
-                [("🧩 Плагины", "duo:plg:0", "plugins"), ("👨‍💼 Команда", "duo:team", "users")],
+                [("🧩 Плагины", "duo:mods", "settings"), ("👨‍💼 Команда", "duo:team", "users")],
                 [("💾 Бекап", "duo:backup", "secrets"), ("📜 Логи", "duo:logs", "system"),
                  ("🔄 Перезапуск", "duo:restart", "system")],
                 [("ℹ️ О боте", "duo:about"), ("🏠 Меню", "duo:main")]]
@@ -1302,7 +1307,8 @@ class TelegramUI:
 
     def plugins_menu(self, offset=0):
         pls = list(self.app.plugins.plugins.values())
-        text = f"<b>🧩 Плагины</b> ({len(pls)})\nОтправьте .py файл в этот чат, чтобы установить плагин.\n"
+        text = (f"<b>📂 Файлы плагинов</b> ({len(pls)})\nЗдесь плагины, установленные вами из файлов: включить, "
+                f"выключить, удалить. Чтобы установить новый — отправьте .py файл в этот чат.\n")
         if self.app.plugins.failed:
             text += "\n⚠️ Не загрузились: " + ", ".join(esc(f["file"]) for f in self.app.plugins.failed)
         rows = []
@@ -1315,13 +1321,13 @@ class TelegramUI:
             nav.append(("➡️", f"duo:plg:{offset + 8}"))
         if nav:
             rows.append(nav)
-        rows.append([("◀️ Назад", "duo:main")])
+        rows.append([("◀️ Плагины", "duo:mods")])
         return text, rows
 
     def plugin_card(self, uid):
         i = self.app.plugins.plugins.get(uid)
         if not i:
-            return "Плагин не найден", [[("◀️ Назад", "duo:plg:0")]]
+            return "Плагин не найден", [[("◀️ Плагины", "duo:mods")]]
         en = self.app.plugins.enabled(uid)
         text = (f"<b>🧩 {esc(i.name)}</b> v{esc(i.version)}\n{esc(i.description)}\n\n"
                 f"Автор: {esc(i.credits)}\nТип: {i.kind}\nФайл: <code>{esc(i.path.name)}</code>\n"
@@ -1331,7 +1337,7 @@ class TelegramUI:
         rows = [[(f"{onoff(en)} {'Выключить' if en else 'Включить'}", f"duo:ptog:{uid}")]]
         if i.settings_page:
             rows.append([("⚙️ Настройки", f"{CBT.PLUGIN_SETTINGS}:{uid}:0")])
-        rows.append([("🗑 Удалить", f"duo:pdel:{uid}"), ("◀️ Назад", "duo:plg:0")])
+        rows.append([("🗑 Удалить", f"duo:pdel:{uid}"), ("◀️ Плагины", "duo:mods")])
         return text, rows
 
     def _kind_rows(self, i, p):
@@ -1647,7 +1653,7 @@ class TelegramUI:
                 if info:
                     self.bot.reply_to(m, f"✅ Плагин <b>{esc(info.name)}</b> установлен.\n"
                                          f"Чтобы хуки инициализации и TG-кнопки заработали полностью — /restart",
-                                      reply_markup=kb([[("🔄 Перезапуск", "duo:restart"), ("🧩 Плагины", "duo:plg:0")]]))
+                                      reply_markup=kb([[("🔄 Перезапуск", "duo:restart"), ("🧩 Плагины", "duo:mods")]]))
                 else:
                     self.bot.reply_to(m, "⚠️ Файл сохранён, но плагин не загрузился — смотрите /logs")
             except Exception as e:
@@ -1934,7 +1940,7 @@ class TelegramUI:
                 res = m.run_action(aid, args)
                 if len(res) > 180:
                     bot.answer_callback_query(c.id, "Готово — ответ ниже")
-                    self.send(cid, f"{m.ICON} <b>{esc(m.NAME)}</b>\n\n{esc(res)[:3800]}", [[("◀️ Модуль", f"duo:mod:{key}")]], uid)
+                    self.send(cid, f"{m.ICON} <b>{esc(m.NAME)}</b>\n\n{esc(res)[:3800]}", [[("◀️ Назад", f"duo:mod:{key}")]], uid)
                     return
                 bot.answer_callback_query(c.id, res, show_alert=True)
                 if sub == "free" and c.message and "Смените пароль" in (getattr(c.message, "text", "") or ""):
@@ -2223,7 +2229,7 @@ class TelegramUI:
                                                                           ("Нет", f"duo:pi:{parts[2]}")]]))
         elif a == "pdel2":
             ok = self.app.plugins.delete(parts[2])
-            self.edit(c, "✅ Удалён (полностью — после /restart)" if ok else "Не найден", [[("🧩 Плагины", "duo:plg:0")]])
+            self.edit(c, "✅ Удалён (полностью — после /restart)" if ok else "Не найден", [[("🧩 Плагины", "duo:mods")]])
         elif a == "inv":
             role = parts[2]
             if role not in ROLES:

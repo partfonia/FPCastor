@@ -468,8 +468,7 @@ function more() {
       can("system") && link("🌐", "Бот и прокси", STATUS && STATUS.telegram.username ? "@" + H(STATUS.telegram.username) : "", "push(botView)"),
       can("system") && link("📱", "Доступ к панели", "пароль, адрес", "push(accessView)"),
       can("users") && link("👨‍💼", "Команда", "помощники и их права", "push(teamView)"),
-      set && link("🧩", "Модули", "аренда, коды с почты, автоцена, расписание лотов…", "push(modulesView)"),
-      can("plugins") && link("🔌", "Свои плагины", "Cardinal, Castor, Playerok Universal", "push(pluginsView)"),
+      set && link("🧩", "Плагины", "аренда, коды с почты, автоцена, расписание лотов…", "push(modulesView)"),
       can("secrets") && link("🔑", "Лицензии", "ключи платных плагинов", "push(licensesView)"),
       can("delivery") && set && link("🏭", "Поставщики (API)", `${(CFG.suppliers || []).length} шт`, "push(suppliersView)")]) +
     g([
@@ -502,10 +501,10 @@ async function modulesView() {
   const groups = ["Аренда", "Выдача", "Перепродажа", "Общение", "Лоты и цены", "Заказы", "Деньги", "Безопасность", "Прочее"];
   [...new Set(MODS.map(m => m.group))].forEach(g => { if (!groups.includes(g)) groups.push(g); });
   const on = MODS.filter(m => getPath("modules." + m.key + ".enabled")).length;
-  view(`${title("Модули")}<p class="hint" style="margin:0 6px 10px">Дополнительные функции бота. Включено ${on} из ${MODS.length}.</p>
+  view(`${title("Плагины")}<p class="hint" style="margin:0 6px 10px">Включено ${on} из ${MODS.length}. Нажмите на плагин — там описание, настройки и включение.</p>
     ${groups.map(g => { const list = MODS.filter(m => m.group === g); return list.length ? `<h3>${H(g)}</h3><div class="group">${list.map(m => `<button class="item clamp" onclick="push(moduleView,'${m.key}')"><span class="ic">${m.icon}</span>
       <span class="tx"><b>${H(m.name)}</b><span>${getPath("modules." + m.key + ".enabled") ? "🟢 " + H(m.status || "включён") : H(m.description)}</span></span><span class="chev">›</span></button>`).join("")}</div>` : ""; }).join("")}
-    <p class="hint" style="margin:10px 6px">Свои плагины — в «Настройки → Свои плагины».</p>`);
+    ${can("plugins") ? `<h3>Установленные вами</h3><div class="group"><button class="item" onclick="push(pluginsView)"><span class="ic">📂</span><span class="tx"><b>Файлы плагинов</b><span>установить .py, включить, удалить</span></span><span class="chev">›</span></button></div>` : ""}`);
 }
 function modField(base, f) {
   const [path, label, type, extra] = f, P = base + "." + path;
@@ -520,7 +519,7 @@ function moduleView(key) {
   const base = "modules." + key;
   const items = m.fields.filter(f => f[2] === "items"), simple = m.fields.filter(f => f[2] !== "items");
   view(`${title(m.icon + " " + m.name)}<p class="hint" style="margin:0 6px 10px">${H(m.description)}</p>
-    <div class="group">${tog(base + ".enabled", "Модуль включён", H(m.status || ""))}</div>
+    <div class="group">${tog(base + ".enabled", "Плагин включён", H(m.status || ""))}</div>
     ${items.map(f => { const list = getPath(base + "." + f[0]) || [], sub = m.item_fields[f[0]] || [];
       return `<h3>${H(f[1])} · ${list.length}</h3>${list.map((it, i) => `<div class="group" style="margin-bottom:8px">
         ${sub.map(sf => modField(base + "." + f[0] + "." + i, sf)).join("")}
@@ -771,7 +770,7 @@ function accessView() {
 }
 async function pluginsView() {
   const j = await api("plugins");
-  view(`${title("Плагины")}
+  view(`${title("Файлы плагинов")}
     <div class="group">${j.plugins.map(p => `<div class="item"><span class="ic">🧩</span><div class="tx"><b>${H(p.name)} <span class="hint">v${H(p.version)}</span></b>
       <span>${H(p.description || p.file)} · ${H(p.kind)}${p.credits ? " · " + H(p.credits) : ""}</span></div>
       <label class="sw"><input type="checkbox" ${p.enabled ? "checked" : ""} aria-label="Включить ${H(p.name)}" onchange="api('plugins/toggle',{uuid:'${p.uuid}'}).then(()=>toast(this.checked?'Включён':'Выключен'))"><i></i></label></div>

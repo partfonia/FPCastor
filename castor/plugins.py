@@ -189,7 +189,8 @@ class PluginManager:
             self.plugins[info.uuid] = info
             mod_cls = getattr(mod, "CASTOR_MODULE", None)  # плагин со своим экраном настроек, как у встроенных модулей
             if mod_cls is not None and getattr(self.app, "modules", None):
-                self.app.modules.register(mod_cls)
+                if self.app.modules.register(mod_cls):
+                    info.module_key = mod_cls.KEY
             log.info("🧩 Плагин загружен: %s v%s (%s)", info.name, info.version, kind)
             return info
         except Exception as e:

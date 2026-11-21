@@ -7,6 +7,8 @@ if (inTG) { document.documentElement.classList.add("tg"); tg.ready(); tg.expand(
 function applyScheme() {
   const dark = tg && tg.initData ? tg.colorScheme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
   document.documentElement.classList.toggle("dark", !!dark);
+  const c = dark ? "#0c0f24" : "#eef0fa";   // шапка Telegram в цвет фона панели
+  try { tg && tg.setHeaderColor && (tg.setHeaderColor(c), tg.setBackgroundColor(c), tg.setBottomBarColor(c)); } catch (e) {}
 }
 applyScheme();
 try { tg && tg.onEvent && tg.onEvent("themeChanged", applyScheme); matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyScheme); } catch (e) {}

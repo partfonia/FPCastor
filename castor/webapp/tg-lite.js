@@ -113,6 +113,9 @@
       selectionChanged: function () { post("web_app_trigger_haptic_feedback", {type: "selection_change"}); }
     },
     ready: function () { post("web_app_ready"); },
+    setHeaderColor: function (c) { post("web_app_set_header_color", {color: c}); },
+    setBackgroundColor: function (c) { post("web_app_set_background_color", {color: c}); },
+    setBottomBarColor: function (c) { post("web_app_set_bottom_bar_color", {color: c}); },
     expand: function () { post("web_app_expand"); },
     close: function () { post("web_app_close"); },
     onEvent: on, offEvent: off,

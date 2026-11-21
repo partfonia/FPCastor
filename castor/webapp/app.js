@@ -3,6 +3,13 @@
 const tg = window.Telegram && Telegram.WebApp && Telegram.WebApp.initData !== undefined ? Telegram.WebApp : null;
 const inTG = !!(tg && tg.initData);
 if (inTG) { document.documentElement.classList.add("tg"); tg.ready(); tg.expand(); }
+/* тема: тёмная или светлая — по Telegram, а в браузере — по настройке системы */
+function applyScheme() {
+  const dark = tg && tg.initData ? tg.colorScheme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.classList.toggle("dark", !!dark);
+}
+applyScheme();
+try { tg && tg.onEvent && tg.onEvent("themeChanged", applyScheme); matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyScheme); } catch (e) {}
 
 let TOKEN = sessionStorage.getItem("duo_t") || "";
 let CFG = null, HAS = {}, STATUS = null, dirty = false, TAB = "home";
@@ -119,10 +126,15 @@ function title(t) { return `<h2>${inTG || !stack.length ? "" : `<button class="b
 /* ───────── компоненты ───────── */
 function sw(path, onchange) {
   const v = !!getPath(path);
-  return `<label class="sw"><input type="checkbox" ${v ? "checked" : ""} aria-label="${H(path)}" onchange="${onchange || `setPath('${path}',this.checked)`}"><i></i></label>`;
+  return `<label class="sw"><input type="checkbox" ${v ? "checked" : ""} aria-label="${H(path)}" onchange="swState(this);${onchange || `setPath('${path}',this.checked)`}"><i></i></label>`;
+}
+function swState(el) {
+  const st = el.closest(".item") && el.closest(".item").querySelector(".state");
+  if (st) { st.textContent = el.checked ? "вкл" : "выкл"; st.className = "state " + (el.checked ? "on" : "off"); }
 }
 function tog(path, label, sub = "", onchange) {
-  return `<div class="item"><div class="tx"><b>${label}</b>${sub ? `<span>${sub}</span>` : ""}</div>${sw(path, onchange)}</div>`;
+  const v = !!getPath(path);
+  return `<div class="item"><div class="tx"><b>${label}<span class="state ${v ? "on" : "off"}">${v ? "вкл" : "выкл"}</span></b>${sub ? `<span>${sub}</span>` : ""}</div>${sw(path, onchange)}</div>`;
 }
 function fld(path, label, type = "text", note = "") {
   const v = getPath(path) ?? "";
@@ -487,7 +499,7 @@ async function setLic(id) {
 let MODS = [];
 async function modulesView() {
   const j = await api("modules"); MODS = j.modules || [];
-  const groups = ["Выдача", "Общение", "Лоты и цены", "Заказы", "Деньги", "Безопасность", "Прочее"];
+  const groups = ["Выдача", "Перепродажа", "Общение", "Лоты и цены", "Заказы", "Деньги", "Безопасность", "Прочее"];
   [...new Set(MODS.map(m => m.group))].forEach(g => { if (!groups.includes(g)) groups.push(g); });
   const on = MODS.filter(m => getPath("modules." + m.key + ".enabled")).length;
   view(`${title("Модули")}<p class="hint" style="margin:0 6px 10px">Дополнительные функции бота. Включено ${on} из ${MODS.length}.</p>

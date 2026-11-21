@@ -2,9 +2,10 @@
 from .chat import AntiSpamModule, SurveyModule, TranslateModule
 from .lots import BulkPriceModule, LotTemplatesModule, WatchModule
 from .money import ExportModule, GoalsModule, ReceiptsModule, RiskModule, TgBackupModule
+from .resell import LztModule, SmmModule
 from .sales import AutoRestoreModule, BundlesModule, LoyaltyModule, PreorderModule, StepsModule
 
-ALL = (StepsModule, PreorderModule, BundlesModule, LoyaltyModule, AutoRestoreModule,
+ALL = (SmmModule, LztModule, StepsModule, PreorderModule, BundlesModule, LoyaltyModule, AutoRestoreModule,
        TranslateModule, AntiSpamModule, SurveyModule,
        LotTemplatesModule, BulkPriceModule, WatchModule,
        GoalsModule, ExportModule, ReceiptsModule, TgBackupModule, RiskModule)

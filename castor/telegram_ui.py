@@ -108,7 +108,7 @@ CB_PERM = {
     "wd": "withdraw", "wdnow": "withdraw", "wdun": "withdraw",
 }
 # какие ключи редактирования требуют особых прав
-SECRET_EDIT = ("golden_key", "token", "password", "cookies")
+SECRET_EDIT = ("golden_key", "token", "password", "cookies", "api_key", "shared_secret")
 
 
 class TelegramUI:
@@ -547,7 +547,7 @@ class TelegramUI:
         return "Раздел не найден", [back]
 
     # ═══════════════ встроенные модули ═══════════════
-    MOD_GROUPS = ("Выдача", "Общение", "Лоты и цены", "Заказы", "Деньги", "Безопасность", "Прочее")
+    MOD_GROUPS = ("Выдача", "Перепродажа", "Общение", "Лоты и цены", "Заказы", "Деньги", "Безопасность", "Прочее")
 
     def mods_menu(self):
         mods = self.app.modules.describe()
@@ -594,6 +594,8 @@ class TelegramUI:
                 if typ != "area":
                     text += f"・ {esc(label)}: <code>{esc(shown[:60])}</code>\n"
                 rows.append([(f"✏️ {label}", f"duo:e:{full}", "settings")])
+            elif typ == "secret":
+                rows.append([(f"🔑 {label}: {'сохранён' if val else 'не задан'}", f"duo:e:{full}", "secrets")])
             elif typ in ("items", "lines"):
                 n = len(val or [])
                 items_note.append(f"{label}: {n}")

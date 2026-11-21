@@ -20,8 +20,9 @@ from typing import TYPE_CHECKING, Optional
 
 import requests
 
-from .core import (BACKUP_DIR, BIN_DIR, LOG_BUFFER, WEBAPP_DIR, Products, UOrder, check_proxy, log, make_backup,
-                   proxy_label, strip_finance)
+from .core import (BACKUP_DIR, BIN_DIR, LOG_BUFFER, PROXY_KINDS, WEBAPP_DIR, Products, UOrder, canonical_proxy,
+                   check_proxy, describe_proxy, log, make_backup, parse_proxy, proxy_kind, proxy_label, split_proxies,
+                   strip_finance)
 from . import APP_NAME, SIGN, VERSION
 from .branding import DEFAULT_WATERMARK, WATERMARK_PRESETS, links
 from .roles import ROLE_HINTS, ROLE_NAMES, ROLES, perms_of
@@ -168,6 +169,7 @@ class WebServer:
                  "plugins/toggle": "plugins", "plugins/delete": "plugins", "plugins/reload": "plugins",
                  "plugins/upload": "plugins", "plugins/url": "plugins", "customers/note": "customers",
                  "telegram/test_token": "system", "telegram/apply": "system", "proxy/test": "system",
+                 "proxy/parse": "system", "proxy/kind": "system",
                  "action": None, "lots/set": "delivery", "supplier/preview": "delivery", "supplier/balance": "delivery",
                  "supplier/test": "delivery", "supplier/resolve": "delivery", "withdraw/run": "withdraw",
                  "withdraw/unpause": "withdraw", "withdraw/plan": "withdraw", "order/cost": "finance",
@@ -246,7 +248,9 @@ class WebServer:
         if p == "proxy":
             pm = app.proxy
             return {"current": pm.current, "label": pm.label(), "results": dict(pm.results),
-                    "telegram": app.status()["telegram"]}
+                    "telegram": app.status()["telegram"], "kinds": PROXY_KINDS,
+                    "info": {x: {"label": proxy_label(x), "desc": describe_proxy(x), "kind": proxy_kind(x)}
+                             for x in cfg.get("telegram.proxy.list", [])}}
         if p == "backups":
             return {"backups": [{"name": f.name, "size": f.stat().st_size, "t": f.stat().st_mtime}
                                 for f in sorted(BACKUP_DIR.glob("backup_*.zip"), reverse=True)]}
@@ -351,12 +355,27 @@ class WebServer:
                 cur = cfg.get("telegram.proxy", {})
                 cur.update({k: v for k, v in b["proxy"].items() if k in ("enabled", "list", "failover",
                                                                          "check_on_start", "allow_direct")})
+                cur["list"] = [canonical_proxy(x) if parse_proxy(x) else x for x in cur.get("list", []) if str(x).strip()]
                 cfg.set("telegram.proxy", cur, save=False)
             if "enabled" in b:
                 cfg.set("telegram.enabled", bool(b["enabled"]), save=False)
             cfg.save()
             ok, info = app.reload_telegram()
             return {"ok": ok, "message": info}
+        if p == "proxy/parse":
+            good, bad = split_proxies(b.get("text", ""), b.get("kind") or None)
+            return {"items": [{"proxy": x, "label": proxy_label(x), "desc": describe_proxy(x)} for x in good],
+                    "bad": bad}
+        if p == "proxy/kind":
+            lst = cfg.get("telegram.proxy.list", [])
+            i = int(b.get("i", -1))
+            if not 0 <= i < len(lst) or b.get("kind") not in PROXY_KINDS:
+                return {"error": "Нет такого прокси"}
+            old, lst[i] = lst[i], canonical_proxy(lst[i], b["kind"])
+            cfg.set("telegram.proxy.list", lst)
+            if app.proxy.current == old:
+                app.proxy.current = lst[i]
+            return {"ok": True, "proxy": lst[i]}
         if p == "proxy/test":
             res = []
             for px in b.get("list", []):

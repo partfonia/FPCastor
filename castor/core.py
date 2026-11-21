@@ -254,6 +254,9 @@ class Config:
     def migrate(self) -> bool:
         """Переносит настройки старых версий: один аккаунт → список, admins → users с ролями."""
         d, changed = self.data, False
+        before = json.dumps(d, sort_keys=True)
+        canon_config_proxies(d)  # прокси в любом виде → единый формат
+        changed = json.dumps(d, sort_keys=True) != before
         acc = d.setdefault("accounts", {"funpay": [], "playerok": []})
         if not acc.get("funpay") and d["funpay"].get("golden_key"):
             acc["funpay"] = [{"id": "fp1", "name": "Основной", "enabled": True,
@@ -388,6 +391,7 @@ class Config:
                     cur_old, cur_new = cur_old.get(p_, {}), cur_new.setdefault(p_, {})
                 if parts[-1] in cur_old:
                     cur_new[parts[-1]] = cur_old[parts[-1]]
+            canon_config_proxies(merged)
             self.data = merged
             self.save()
         for fn in self.listeners:
@@ -739,44 +743,316 @@ def esc(s) -> str:
     return html.escape(str(s if s is not None else ""), quote=False)
 
 
+# ───────────────────────── прокси: разбор любых форматов ─────────────────────────
+PROXY_KINDS = {"auto": "определить автоматически", "ipv4": "IPv4", "ipv4_shared": "IPv4 Shared", "ipv6": "IPv6"}
+_SCHEMES = {"http": "http", "https": "https", "socks5": "socks5", "socks5h": "socks5h", "socks": "socks5",
+            "socks4": "socks4", "socks4a": "socks4a", "sock5": "socks5", "s5": "socks5", "http(s)": "http"}
+_KV_KEYS = {
+    "host": ("ip", "хост", "host", "адрес", "address", "server", "сервер", "ip-адрес", "ip адрес"),
+    "port": ("порт", "port", "http-порт", "http порт", "socks-порт", "socks5-порт", "socks порт", "socks5 порт"),
+    "user": ("логин", "login", "user", "username", "пользователь", "юзер"),
+    "password": ("пароль", "password", "pass", "pwd"),
+    "scheme": ("тип", "протокол", "protocol", "type", "схема", "scheme"),
+}
+
+
+def _is_ipv6(h: str) -> bool:
+    import ipaddress
+    try:
+        return isinstance(ipaddress.ip_address(h.strip("[]")), ipaddress.IPv6Address)
+    except ValueError:
+        return False
+
+
+def _is_port(s: str) -> bool:
+    return s.isdigit() and 0 < int(s) < 65536
+
+
+def _is_host(s: str) -> bool:
+    import ipaddress
+    s = s.strip("[]")
+    try:
+        ipaddress.ip_address(s)
+        return True
+    except ValueError:
+        return bool(re.fullmatch(r"(?=.*[a-zA-Z.])[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)+", s))
+
+
+def _split_hostport(s: str):
+    """'1.2.3.4:80' / '[::1]:80' / 'host:80' → (host, port) или None"""
+    s = s.strip()
+    m = re.fullmatch(r"\[([0-9a-fA-F:.]+)\]:(\d+)", s)
+    if m:
+        return m.group(1), m.group(2)
+    if s.count(":") == 1:
+        h, p = s.split(":")
+        if _is_host(h) and _is_port(p):
+            return h, p
+    if s.count(":") >= 2:  # голый IPv6 + порт в конце
+        h, _, p = s.rpartition(":")
+        if _is_ipv6(h) and _is_port(p):
+            return h, p
+    return None
+
+
+def _parse_kv(text: str) -> Optional[dict]:
+    """Блок из кабинета продавца: «IP: 1.2.3.4\nПорт: 8000\nЛогин: …»"""
+    out = {}
+    for line in re.split(r"[\n;,|]+", text):
+        m = re.match(r"\s*([^:=\t]+?)\s*[:=\t]\s*(.+?)\s*$", line)
+        if not m:
+            continue
+        k, v = m.group(1).lower().strip(" -•*"), m.group(2).strip()
+        for field, names in _KV_KEYS.items():
+            if k in names or any(k.startswith(n) for n in names if len(n) > 3):
+                if field == "host" and _split_hostport(v):
+                    out["host"], out["port"] = _split_hostport(v)
+                else:
+                    out.setdefault(field, v)
+                break
+    if out.get("host") and out.get("port"):
+        return out
+    return None
+
+
+def parse_proxy(text: str) -> Optional[dict]:
+    """Понимает почти любую запись прокси и возвращает
+    {"scheme", "host", "port", "user", "password", "kind"} или None.
+
+    socks5://user:pass@host:port · user:pass@host:port · host:port@user:pass · host:port:user:pass ·
+    user:pass:host:port · host:port · «host port user pass» · [IPv6]:port · IPv6:port:user:pass ·
+    блок «IP: … Порт: … Логин: … Пароль: …». Тип (#ipv4, #ipv4_shared, #ipv6) — в конце после #."""
+    from urllib.parse import unquote
+    t = (text or "").strip().strip("'\"`")
+    if not t:
+        return None
+    kind = "auto"
+    m = re.search(r"#\s*(ipv4_shared|ipv4|ipv6|auto)\s*$", t, re.I)
+    if m:
+        kind, t = m.group(1).lower(), t[:m.start()].strip()
+    # многострочный блок «ключ: значение»
+    if "\n" in t or re.search(r"(?i)(порт|port|логин|login|пароль|password)\s*[:=]", t):
+        kv = _parse_kv(t)
+        if kv:
+            sc = _SCHEMES.get(kv.get("scheme", "").lower().split()[0] if kv.get("scheme") else "", "")
+            return {"scheme": sc or "http", "host": kv["host"].strip("[]"), "port": kv["port"],
+                    "user": kv.get("user", ""), "password": kv.get("password", ""), "kind": kind,
+                    "scheme_given": bool(sc)}
+        t = " ".join(t.split())
+    scheme, given = "http", False
+    m = re.match(r"^([a-zA-Z0-9()]+)://", t)
+    if m:
+        scheme, given = _SCHEMES.get(m.group(1).lower(), m.group(1).lower()), True
+        t = t[m.end():]
+    else:  # «socks5 1.2.3.4:80 …»
+        m = re.match(r"^(socks5h?|socks4a?|socks|https?)[\s:]+", t, re.I)
+        if m and not _is_port(t[m.end():].split(":")[0]):
+            scheme, given = _SCHEMES[m.group(1).lower()], True
+            t = t[m.end():]
+    t = t.strip().rstrip("/")
+    res = None
+    if "@" in t:
+        a, _, b = t.rpartition("@")
+        hp = _split_hostport(b)
+        if hp:  # user:pass@host:port
+            u, _, pw = a.partition(":")
+            res = (hp[0], hp[1], u, pw)
+        else:
+            hp = _split_hostport(a)
+            if hp:  # host:port@user:pass
+                u, _, pw = b.partition(":")
+                res = (hp[0], hp[1], u, pw)
+    if res is None:
+        parts = [x for x in re.split(r"\s+", t) if x]
+        if len(parts) == 1:
+            s = parts[0]
+            hp = _split_hostport(s)
+            if hp:
+                res = (hp[0], hp[1], "", "")
+            else:
+                m6 = re.fullmatch(r"\[([0-9a-fA-F:.]+)\]:(\d+):([^:]*):(.*)", s)
+                if m6:
+                    res = (m6.group(1), m6.group(2), m6.group(3), m6.group(4))
+                else:
+                    seg = s.split(":")
+                    if len(seg) == 4:
+                        if _is_host(seg[0]) and _is_port(seg[1]):
+                            res = (seg[0], seg[1], seg[2], seg[3])
+                        elif _is_host(seg[2]) and _is_port(seg[3]):
+                            res = (seg[2], seg[3], seg[0], seg[1])
+                    elif len(seg) > 4:  # IPv6:port:user:pass без скобок
+                        h = ":".join(seg[:-3])
+                        if _is_ipv6(h) and _is_port(seg[-3]):
+                            res = (h, seg[-3], seg[-2], seg[-1])
+                        h = ":".join(seg[2:-1])
+                        if res is None and _is_ipv6(h) and _is_port(seg[-1]):
+                            res = (h, seg[-1], seg[0], seg[1])
+        else:
+            # через пробелы: host port [user pass] или host:port user pass
+            flat = []
+            for x in parts:
+                hp = _split_hostport(x)
+                flat += list(hp) if hp else [x]
+            for i in range(len(flat) - 1):
+                if _is_host(flat[i]) and _is_port(flat[i + 1]):
+                    rest = flat[:i] + flat[i + 2:]
+                    res = (flat[i], flat[i + 1], rest[0] if rest else "", rest[1] if len(rest) > 1 else "")
+                    break
+    if res is None:
+        return None
+    host, port, user, pw = res
+    return {"scheme": scheme, "host": host.strip("[]"), "port": port, "user": unquote(user),
+            "password": unquote(pw), "kind": kind, "scheme_given": given}
+
+
+def build_proxy(d: dict, with_kind=True) -> str:
+    from urllib.parse import quote
+    host = f"[{d['host']}]" if _is_ipv6(d["host"]) else d["host"]
+    auth = f"{quote(d['user'], safe='')}:{quote(d.get('password', ''), safe='')}@" if d.get("user") else ""
+    s = f"{d.get('scheme') or 'http'}://{auth}{host}:{d['port']}"
+    k = d.get("kind", "auto")
+    return s + (f"#{k}" if with_kind and k and k != "auto" else "")
+
+
+def proxy_kind(p: str) -> str:
+    d = parse_proxy(p)
+    if not d:
+        return "auto"
+    if d["kind"] != "auto":
+        return d["kind"]
+    return "ipv6" if _is_ipv6(d["host"]) else "auto"
+
+
+def canonical_proxy(text: str, kind: str = None) -> str:
+    """Приводит любую запись к виду scheme://user:pass@host:port[#тип] — так она и хранится."""
+    d = parse_proxy(text)
+    if not d:
+        return (text or "").strip()
+    if kind:
+        d["kind"] = kind
+    return build_proxy(d)
+
+
 def normalize_proxy(p: str) -> str:
-    """socks5://u:p@ip:port · http://ip:port · ip:port · ip:port:user:pass · user:pass@ip:port"""
-    p = (p or "").strip()
+    """Строка для requests/telebot: без пометки типа."""
+    d = parse_proxy(p)
+    if not d:
+        p = (p or "").split("#")[0].strip()
+        return p if not p or "://" in p else "http://" + p
+    return build_proxy(d, with_kind=False)
+
+
+def describe_proxy(p: str) -> str:
+    """«SOCKS5 · 1.2.3.4:8000 · логин user · IPv4 Shared» — чтобы человек видел, как бот понял запись."""
+    d = parse_proxy(p)
+    if not d:
+        return "не удалось разобрать"
+    host = f"[{d['host']}]" if _is_ipv6(d["host"]) else d["host"]
+    parts = [d["scheme"].upper() if d.get("scheme_given") else "тип подключения подберу сам",
+             f"{host}:{d['port']}", f"логин {d['user']}" if d["user"] else "без логина"]
+    k = proxy_kind(p)
+    if k != "auto":
+        parts.append(PROXY_KINDS[k])
+    return " · ".join(parts)
+
+
+def split_proxies(text: str, kind: str = None) -> tuple:
+    """Текст с одним или несколькими прокси → ([канонические строки], [нераспознанные строки]).
+    Блок «IP: … Порт: …» считается одним прокси."""
+    text = (text or "").strip()
+    if not text:
+        return [], []
+    if re.search(r"(?i)(порт|port|логин|login|пароль|password)\s*[:=]", text):
+        d = parse_proxy(text)
+        return ([canonical_proxy(text, kind)], []) if d else ([], [text])
+    good, bad = [], []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        (good.append(canonical_proxy(line, kind)) if parse_proxy(line) else bad.append(line))
+    return good, bad
+
+
+def canon_config_proxies(data: dict):
+    """Приводит все прокси в конфиге к единому виду (для старых и вставленных вручную записей)."""
+    try:
+        tp = data.get("telegram", {}).get("proxy", {})
+        if isinstance(tp.get("list"), list):
+            tp["list"] = [canonical_proxy(p) if parse_proxy(p) else p for p in tp["list"] if str(p).strip()]
+        for plat in ("funpay", "playerok"):
+            for a in data.get("accounts", {}).get(plat, []) or []:
+                if isinstance(a, dict) and a.get("proxy") and parse_proxy(a["proxy"]):
+                    a["proxy"] = canonical_proxy(a["proxy"])
+            pp = data.get(plat, {})
+            if isinstance(pp, dict) and isinstance(pp.get("proxy"), str) and parse_proxy(pp["proxy"]):
+                pp["proxy"] = canonical_proxy(pp["proxy"])
+        for sup in data.get("suppliers", {}).get("list", []) if isinstance(data.get("suppliers"), dict) else []:
+            if isinstance(sup, dict) and sup.get("proxy") and parse_proxy(sup["proxy"]):
+                sup["proxy"] = canonical_proxy(sup["proxy"])
+    except Exception:
+        pass
+
+
+def scheme_title(v: str) -> str:
+    """socks5h://… → SOCKS5, http://… → HTTP"""
+    sc = (v or "").split("://")[0].lower()
+    return {"socks5h": "SOCKS5", "socks4a": "SOCKS4"}.get(sc, sc.upper())
+
+
+def proxy_url(p: str) -> str:
+    """Готовая строка подключения: для IPv6-прокси DNS идёт через прокси (socks5h)."""
     if not p:
         return ""
-    if "://" in p:
-        return p
-    parts = p.split(":")
-    if "@" not in p and len(parts) == 4:
-        ip, port, user, pwd = parts
-        return f"http://{user}:{pwd}@{ip}:{port}"
-    return "http://" + p
+    return _proxy_variants(p)[0] if parse_proxy(p) else normalize_proxy(p)
 
 
 def proxies_dict(p: str) -> Optional[dict]:
-    p = normalize_proxy(p)
+    p = proxy_url(p)
     return {"http": p, "https": p} if p else None
 
 
 def proxy_label(p: str) -> str:
-    return normalize_proxy(p).split("@")[-1] if p else "напрямую"
+    if not p:
+        return "напрямую"
+    d = parse_proxy(p)
+    if not d:
+        return normalize_proxy(p).split("@")[-1]
+    host = f"[{d['host']}]" if _is_ipv6(d["host"]) else d["host"]
+    k = proxy_kind(p)
+    return f"{host}:{d['port']}" + (f" ({PROXY_KINDS[k]})" if k != "auto" else "")
 
 
 def _proxy_variants(p: str) -> list:
-    """Варианты подключения к одному прокси: socks5h (DNS через прокси), socks5, http."""
-    n = normalize_proxy(p)
-    if not n:
-        return [""]
-    scheme, rest = n.split("://", 1)
-    order = {"socks5": ["socks5h", "socks5", "http"], "socks5h": ["socks5h", "socks5", "http"],
-             "socks4": ["socks4a", "socks4"], "http": ["http", "socks5h"], "https": ["https", "http", "socks5h"]}
-    return [f"{sc}://{rest}" for sc in order.get(scheme, [scheme])]
+    """Варианты подключения к одному прокси. Если схема указана — она первая; если нет — пробуем
+    http и socks5h. Для IPv6 только варианты с DNS на стороне прокси (иначе адрес сайта ищется
+    у вас, а прокси может не уметь ходить на IPv4)."""
+    d = parse_proxy(p)
+    if not d:
+        return [normalize_proxy(p)] if p else [""]
+    v6 = proxy_kind(p) == "ipv6"
+    if d.get("scheme_given"):
+        order = {"socks5": ["socks5h", "socks5", "http"], "socks5h": ["socks5h", "socks5", "http"],
+                 "socks4": ["socks4a", "socks4"], "socks4a": ["socks4a", "socks4"],
+                 "http": ["http", "socks5h"], "https": ["https", "http", "socks5h"]}.get(d["scheme"], [d["scheme"]])
+    else:
+        order = ["http", "socks5h", "socks5"]
+    if v6:
+        order = [s for s in order if s not in ("socks5", "socks4")] or ["socks5h"]
+    out = []
+    for sc in order:
+        v = build_proxy(dict(d, scheme=sc), with_kind=False)
+        if v not in out:
+            out.append(v)
+    return out
 
 
 def _proxy_reason(err: Exception) -> str:
     s = f"{type(err).__name__}: {err}".lower()
     if "407" in s or "authentication" in s or "auth" in s and "socks" in s or "0x01" in s and "socks" in s:
         return "неверный логин или пароль прокси"
+    if "address family" in s or "network is unreachable" in s or "10051" in s or "10047" in s:
+        return "на этом компьютере нет IPv6-интернета, а адрес прокси — IPv6. Возьмите прокси со входом по IPv4"
     if "refused" in s or "10061" in s:
         return "прокси отклоняет подключение — проверьте IP и порт"
     if "timed out" in s or "timeout" in s:
@@ -788,39 +1064,71 @@ def _proxy_reason(err: Exception) -> str:
     return "прокси не работает"
 
 
+def _exit_ip(v: str) -> tuple:
+    """(ip, версия 4/6) — с какого адреса прокси выходит в интернет."""
+    import ipaddress
+    for u in ("https://api64.ipify.org?format=json", "https://api.ipify.org?format=json"):
+        try:
+            ip = requests.get(u, proxies={"http": v, "https": v}, timeout=10).json()["ip"]
+            return ip, ipaddress.ip_address(ip).version
+        except Exception:
+            continue
+    return "", 0
+
+
+def _ip_country(ip: str) -> tuple:
+    try:
+        j = requests.get(f"http://ip-api.com/json/{ip}?fields=status,country,countryCode&lang=ru", timeout=8).json()
+        return j.get("country", ""), j.get("countryCode", "")
+    except Exception:
+        return "", ""
+
+
+_BLOCKED = ("RU", "BY", "IR", "CN")
+
+
 def diagnose_proxy(p: str, url="https://api.telegram.org", timeout=12) -> dict:
     """Проверяет прокси и объясняет причину, если не работает.
-    → {"ok", "ms", "proxy" (рабочий вариант строки), "reason", "country"}"""
+    → {"ok", "ms", "proxy" (рабочий вариант строки), "reason", "country", "kind", "exit_ip"}"""
+    base = {"country": "", "kind": "", "exit_ip": ""}
     if not p:
         t = time.time()
         try:
             requests.get(url, timeout=timeout)
-            return {"ok": True, "ms": round((time.time() - t) * 1000), "proxy": "", "reason": "", "country": ""}
+            return {**base, "ok": True, "ms": round((time.time() - t) * 1000), "proxy": "", "reason": ""}
         except Exception as e:
-            return {"ok": False, "ms": None, "proxy": "", "reason": "нет прямой связи", "country": "", "error": str(e)}
+            return {**base, "ok": False, "ms": None, "proxy": "", "reason": "нет прямой связи", "error": str(e)}
+    kind = proxy_kind(p)
     variants, last = _proxy_variants(p), None
     for v in variants:
         t = time.time()
         try:
             requests.get(url, proxies={"http": v, "https": v}, timeout=timeout)
-            return {"ok": True, "ms": round((time.time() - t) * 1000), "proxy": v, "reason": "", "country": ""}
+            return {**base, "ok": True, "ms": round((time.time() - t) * 1000), "proxy": v, "reason": "",
+                    "kind": kind}
         except Exception as e:
-            last = e
-    # Telegram не открылся — жив ли прокси вообще и откуда он
+            if last is None or "missing dependencies" in str(last).lower():
+                last = e  # запоминаем самую понятную ошибку, а не последнюю
+    # сайт не открылся — жив ли прокси вообще, откуда он и по какому протоколу выходит
+    site = url.split("/")[2]
     for v in variants:
-        try:
-            j = requests.get("http://ip-api.com/json/?fields=status,country,countryCode&lang=ru",
-                             proxies={"http": v, "https": v}, timeout=10).json()
-        except Exception:
+        ip, ver = _exit_ip(v)
+        if not ip:
             continue
-        country, code = j.get("country", ""), j.get("countryCode", "")
-        if code in ("RU", "BY", "IR", "CN"):
-            why = (f"прокси работает, но он из страны «{country}» — там Telegram заблокирован, и через этот прокси "
-                   f"его тоже не открыть. Нужен зарубежный прокси: Нидерланды, Германия, Финляндия и т.п.")
+        country, code = _ip_country(ip)
+        real = "ipv6" if ver == 6 else (kind if kind in ("ipv4", "ipv4_shared") else "ipv4")
+        if code in _BLOCKED:
+            why = (f"прокси работает, но он из страны «{country}» — там {site} может быть заблокирован. "
+                   f"Нужен зарубежный прокси: Нидерланды, Германия, Финляндия и т.п.")
+        elif ver == 6:
+            why = (f"это IPv6-прокси (страна: {country or '?'}), а {site} через IPv6 не открылся. "
+                   f"Для этого сайта нужен IPv4 или IPv4 Shared прокси")
         else:
-            why = f"прокси работает (страна: {country or '?'}), но через него не открывается {url.split('/')[2]}"
-        return {"ok": False, "ms": None, "proxy": v, "reason": why, "country": country, "alive": True}
-    return {"ok": False, "ms": None, "proxy": "", "reason": _proxy_reason(last), "country": "", "error": str(last)[:200]}
+            why = f"прокси работает (страна: {country or '?'}), но через него не открывается {site}"
+        return {"ok": False, "ms": None, "proxy": v, "reason": why, "country": country, "alive": True,
+                "kind": real, "exit_ip": ip}
+    return {**base, "ok": False, "ms": None, "proxy": "", "reason": _proxy_reason(last), "kind": kind,
+            "error": str(last)[:200]}
 
 
 def check_proxy(p: str, url="https://api.telegram.org", timeout=12) -> tuple:

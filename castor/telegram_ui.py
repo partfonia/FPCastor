@@ -17,7 +17,8 @@ from . import APP_NAME, SIGN, VERSION
 from .branding import (WATERMARK_PRESETS, apply_watermark, bot_description, bot_short_description,
                        description_hash, links_html, watermark)
 from .compat import CBT, _Anything
-from .core import (LOGS_DIR, Products, UOrder, check_proxy, esc, log, make_backup, proxy_label)
+from .core import (LOGS_DIR, PROXY_KINDS, Products, UOrder, canonical_proxy, check_proxy, describe_proxy, esc, log,
+                   make_backup, parse_proxy, proxy_kind, proxy_label, scheme_title)
 from .finance import mask_wallet
 from .roles import ROLE_HINTS, ROLE_NAMES, ROLES, perms_of
 
@@ -71,7 +72,7 @@ CB_PERM = {
     "cmds": "settings", "cdel": "settings", "cntf": "settings", "cadd": "settings",
     "ntf": "settings", "gen": "settings", "feat": "settings", "t": "settings", "e": "settings",
     "plg": "plugins", "pi": "plugins", "ptog": "plugins", "pdel": "plugins", "pdel2": "plugins",
-    "prx": "system", "xadd": "system", "xtest": "system", "xdel": "system", "xuse": "system",
+    "prx": "system", "xadd": "system", "xkind": "system", "xkinds": "system", "xtest": "system", "xdel": "system", "xuse": "system",
     "xtoggle": "system", "xall": "system", "xapply": "system", "logs": "system", "restart": "system",
     "backup": "secrets",
     "team": "users", "inv": "users", "usr": "users", "urole": "users", "udel": "users",
@@ -645,6 +646,47 @@ class TelegramUI:
         rows.append([("🗑 Удалить", f"duo:pdel:{uid}"), ("◀️ Назад", "duo:plg:0")])
         return text, rows
 
+    def _kind_rows(self, i, p):
+        cur = proxy_kind(p)
+        return [[(("• " if cur == k else "") + ("Авто" if k == "auto" else t), f"duo:xkind:{i}:{k}")
+                 for k, t in PROXY_KINDS.items()]]
+
+    def _check_acc_proxy(self, cid, platform, acc_id, p):
+        """Проверяет прокси аккаунта на сайте площадки и запоминает подошедший тип подключения."""
+        from .core import diagnose_proxy
+        d = diagnose_proxy(p, "https://funpay.com" if platform == "funpay" else "https://playerok.com")
+        if d["ok"]:
+            fixed = canonical_proxy(d["proxy"], proxy_kind(p))
+            if fixed != p:
+                accs = self.cfg.accounts(platform)
+                for a in accs:
+                    if a["id"] == acc_id and a.get("proxy") == p:
+                        a["proxy"] = fixed
+                self.cfg.set(f"accounts.{platform}", accs)
+                self.app.sync_accounts()
+            self.send(cid, f"✅ Прокси аккаунта работает: {d['ms']} мс (подключение {scheme_title(d['proxy'])})")
+        else:
+            self.send(cid, f"⚠️ Прокси аккаунта не открыл сайт площадки: {esc(d['reason'])}",
+                      [[("👤 Аккаунт", f"duo:acc:{acc_id}")]])
+
+    def _test_and_report(self, cid, p):
+        from .core import diagnose_proxy
+        d = diagnose_proxy(p)
+        if d["ok"]:
+            fixed = canonical_proxy(d["proxy"], proxy_kind(p))
+            if fixed != p:  # запоминаем подошедший тип подключения (например, SOCKS5 вместо HTTP)
+                lst = self.cfg.get("telegram.proxy.list", [])
+                lst = [fixed if x == p else x for x in lst]
+                self.cfg.set("telegram.proxy.list", lst)
+                p = fixed
+            msg = f"✅ <code>{esc(proxy_label(p))}</code> работает: {d['ms']} мс (подключение {scheme_title(d['proxy'])})"
+            self.app.proxy.results[p] = {"ok": True, "info": d["ms"], "t": time.time(), "variant": d["proxy"]}
+        else:
+            msg = f"❌ <code>{esc(proxy_label(p))}</code>: {esc(d['reason'])}"
+            if d.get("kind") == "ipv6" and proxy_kind(p) == "auto":
+                msg += "\n<i>Проверка показала, что это IPv6-прокси.</i>"
+        self.send(cid, msg, [[("🤖 Бот и прокси", "duo:prx")]])
+
     def proxy_menu(self):
         pc = self.cfg.get("telegram.proxy", {})
         pm = self.app.proxy
@@ -657,14 +699,15 @@ class TelegramUI:
             mark = "✅" if r and r["ok"] else ("❌" if r else "▫️")
             cur = " ← сейчас" if p == pm.current else ""
             text += f"{i + 1}. {mark} <code>{esc(proxy_label(p))}</code>{cur}\n"
-            rows.append([(f"▶️ {proxy_label(p)[:22]}", f"duo:xuse:{i}"), ("🧪", f"duo:xtest:{i}"), ("🗑", f"duo:xdel:{i}")])
+            rows.append([(f"▶️ {proxy_label(p)[:22]}", f"duo:xuse:{i}"), ("🧪", f"duo:xtest:{i}"),
+                         ("🏷", f"duo:xkinds:{i}"), ("🗑", f"duo:xdel:{i}")])
         rows.append([(f"{onoff(pc.get('enabled'))} Прокси", "duo:xtoggle"),
                      (f"{onoff(pc.get('failover', True))} Автопереключение", "duo:t:telegram.proxy.failover:prx")])
         rows.append([("➕ Добавить прокси", "duo:xadd"), ("🧪 Проверить все", "duo:xall")])
         rows.append([("🔁 Применить сейчас", "duo:xapply"), ("🤖 Сменить бота", "duo:e:telegram.token", "secrets")])
         rows.append([("◀️ Назад", "duo:main")])
-        text += ("\nФорматы: <code>socks5://user:pass@ip:port</code> · <code>http://ip:port</code> · "
-                 "<code>ip:port:user:pass</code>\n<i>Изменения применяются сразу, без перезапуска.</i>")
+        text += ("\nПрокси можно присылать в любом виде — бот сам приведёт запись к нужному формату. "
+                 "🏷 — тип: IPv4, IPv4 Shared или IPv6.\n<i>Изменения применяются сразу, без перезапуска.</i>")
         return text, rows
 
     # ---------- регистрация хендлеров ----------
@@ -964,12 +1007,19 @@ class TelegramUI:
             n = Products.add(rule["file"], text.splitlines())
             self.bot.reply_to(m, f"✅ В файле <code>{esc(rule['file'])}</code> теперь {n} шт.")
         elif st == "duo_xadd":
-            ok, info = check_proxy(text)
+            if not parse_proxy(text):
+                self.bot.reply_to(m, "Не получилось разобрать прокси — нужны хотя бы IP и порт, например "
+                                     "<code>45.91.209.143:10861</code> или <code>ip:порт:логин:пароль</code>")
+                return
+            p = canonical_proxy(text)
             lst = c.get("telegram.proxy.list", [])
-            lst.append(text)
+            lst.append(p)
             c.set("telegram.proxy.list", lst)
-            self.send(cid, f"Прокси добавлен. Проверка: {'✅ ' + str(info) + ' мс' if ok else '❌ ' + esc(info)}",
+            self.send(cid, f"Распознал: {esc(describe_proxy(text))}\nСохранил как <code>{esc(proxy_label(p))}</code>\n\n"
+                           f"Какой это прокси? Если не знаете — оставьте «авто», бот проверит сам.",
+                      self._kind_rows(len(lst) - 1, p) +
                       [[("🔁 Применить", "duo:xapply"), ("🤖 Бот и прокси", "duo:prx")]], uid)
+            threading.Thread(target=self._test_and_report, args=(cid, p), daemon=True).start()
         elif st == "duo_addacc":
             self._add_account(m, d["platform"], text)
         elif st == "duo_wdamount":
@@ -1022,12 +1072,23 @@ class TelegramUI:
             _, acc_id, field = key.split(".", 2)
             platform = self._platform(acc_id)
             accs = c.accounts(platform)
+            note = ""
+            if field == "proxy" and text != "-":
+                if not parse_proxy(text):
+                    self.bot.reply_to(m, "Не получилось разобрать прокси — нужны хотя бы IP и порт, "
+                                         "например <code>45.91.209.143:10861</code>")
+                    return
+                note = f"\nРаспознал: {esc(describe_proxy(text))}"
+                text = canonical_proxy(text)
             for a in accs:
                 if a["id"] == acc_id:
                     a[field] = "" if text == "-" else text
             c.set(f"accounts.{platform}", accs)
             self.app.sync_accounts()
-            self.send(m.chat.id, "✅ Сохранено и применено", [[("👤 Аккаунт", f"duo:acc:{acc_id}")]], uid)
+            self.send(m.chat.id, "✅ Сохранено и применено" + note, [[("👤 Аккаунт", f"duo:acc:{acc_id}")]], uid)
+            if field == "proxy" and text and text != "-":
+                threading.Thread(target=self._check_acc_proxy, args=(m.chat.id, platform, acc_id, text),
+                                 daemon=True).start()
             return
         if key == "general.work_hours.range":
             mm = re.match(r"(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})", text)
@@ -1332,8 +1393,28 @@ class TelegramUI:
             self.edit(c, *self.team_menu())
             return
         elif a == "xadd":
-            self.ask(cid, uid, "duo_xadd", "Отправьте прокси: <code>socks5://user:pass@ip:port</code> или "
-                                           "<code>ip:port:user:pass</code>\n<i>MTProto-прокси не подходят для Bot API.</i>")
+            self.ask(cid, uid, "duo_xadd", "Отправьте прокси в любом виде — как дал продавец:\n"
+                                           "<code>ip:порт:логин:пароль</code> · <code>логин:пароль@ip:порт</code> · "
+                                           "<code>socks5://логин:пароль@ip:порт</code> · IPv6 · или блоком «IP / Порт / "
+                                           "Логин / Пароль».\n<i>MTProto-прокси не подходят для Bot API.</i>")
+        elif a in ("xkinds", "xkind"):
+            i = int(parts[2])
+            lst = self.cfg.get("telegram.proxy.list", [])
+            if i >= len(lst):
+                return
+            if a == "xkind":
+                old = lst[i]
+                lst[i] = canonical_proxy(old, parts[3])
+                self.cfg.set("telegram.proxy.list", lst)
+                if self.app.proxy.current == old:
+                    self.app.proxy.current = lst[i]
+                bot.answer_callback_query(c.id, f"Тип: {PROXY_KINDS[parts[3]]}")
+            p = lst[i]
+            self.edit(c, f"<b>🏷 Тип прокси</b> <code>{esc(proxy_label(p))}</code>\n{esc(describe_proxy(p))}\n\n"
+                         "IPv4 — обычный личный · IPv4 Shared — общий на несколько человек · "
+                         "IPv6 — только для сайтов с IPv6 (Telegram подходит)",
+                      self._kind_rows(i, p) + [[("◀️ Назад", "duo:prx")]])
+            return
         elif a == "xtest":
             p = self.cfg.get("telegram.proxy.list", [])[int(parts[2])]
             ok, info = self.app.proxy.test(p)

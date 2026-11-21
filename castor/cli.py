@@ -264,26 +264,72 @@ def _step_platform(cfg: Config, platform: str, n: int):
             return
 
 
-def _ask_proxy(purpose: str, test_url: str) -> tuple:
-    """→ (прокси, проверен ли). Пустая строка — без прокси."""
-    info("Форматы: socks5://логин:пароль@ip:порт · http://логин:пароль@ip:порт · ip:порт:логин:пароль")
+KIND_OPTIONS = [("auto", "Определить автоматически", "бот сам поймёт по адресу и проверке"),
+                ("ipv4", "IPv4", "обычный личный прокси — подходит для всего"),
+                ("ipv4_shared", "IPv4 Shared", "общий IPv4 на несколько человек — дешевле, может быть медленнее"),
+                ("ipv6", "IPv6", "работает только с сайтами, у которых есть IPv6 (Telegram — да)")]
+
+
+def _read_proxy(purpose: str) -> str:
+    """Читает прокси одной строкой или блоком «IP: … / Порт: … / Логин: … / Пароль: …»."""
+    first = ask_text(f"Прокси {purpose} (Enter — без прокси)")
+    if not first or not re.match(r"(?i)\s*(ip|хост|host|адрес|сервер|server|порт|port|логин|login|"
+                                 r"пароль|password|тип|протокол)\b[^:=]*[:=]", first):
+        return first
+    lines = [first]
+    info("Вижу блок «ключ: значение» — вставьте остальные строки, в конце пустая строка")
     while True:
-        p = ask_text(f"Прокси {purpose} (Enter — без прокси)")
-        if not p:
+        v = _input(f"  {D}…{R} ").rstrip()
+        if not v.strip():
+            break
+        lines.append(v)
+    return "\n".join(lines)
+
+
+def _ask_proxy(purpose: str, test_url: str) -> tuple:
+    """→ (прокси, проверен ли). Пустая строка — без прокси. Запись приводится к нужному формату сама."""
+    from .core import _exit_ip, canonical_proxy, describe_proxy, parse_proxy, proxy_kind, scheme_title
+    info("Вставьте прокси в любом виде — бот сам приведёт его к нужному формату.")
+    info(f"{D}Например: ip:порт:логин:пароль · логин:пароль@ip:порт · socks5://логин:пароль@ip:порт{R}")
+    while True:
+        raw = _read_proxy(purpose)
+        if not raw:
             return "", False
+        d = parse_proxy(raw)
+        if not d:
+            bad("Не получилось разобрать запись — нужны хотя бы IP и порт, например 45.91.209.143:10861")
+            continue
+        ok(f"Распознал: {describe_proxy(raw)}")
+        given = proxy_kind(raw)
+        default = next(i for i, (k, _, _) in enumerate(KIND_OPTIONS, 1) if k == given)
+        c = choose("Какой это прокси? (как написано у продавца)", [(t, sub) for _, t, sub in KIND_OPTIONS], default)
+        kind = KIND_OPTIONS[c - 1][0]
+        if kind == "auto" and given == "ipv6":
+            kind = "ipv6"  # адрес сам IPv6
+        p = canonical_proxy(raw, kind)
         with Spinner("Проверяю прокси — пробую разные типы подключения (до 30 с)…"):
-            d = diagnose_proxy(p, test_url)
-        if d["ok"]:
-            note = "" if normalize_proxy(p) == d["proxy"] else f" {D}(подошёл тип {d['proxy'].split('://')[0]}){R}"
-            ok(f"Прокси работает: {proxy_label(p)}, ответ за {d['ms']} мс{note}")
-            return d["proxy"], True
-        bad(d["reason"])
-        if not d.get("alive"):
-            info("Проверьте в кабинете продавца прокси: тип (SOCKS5 или HTTP), порт, срок действия и привязку к IP")
+            r = diagnose_proxy(p, test_url)
+            if r["ok"] and kind == "auto":
+                ip, ver = _exit_ip(r["proxy"])
+                if ver == 6:
+                    kind, r["kind"] = "ipv6", "ipv6"
+        if r["ok"]:
+            res = canonical_proxy(r["proxy"], kind)
+            note = f" {D}(подключение {scheme_title(r['proxy'])}){R}"
+            ok(f"Прокси работает: {proxy_label(res)}, ответ за {r['ms']} мс{note}")
+            info(f"{D}Сохраню как: {res}{R}")
+            return res, True
+        if kind == "auto" and r.get("kind") == "ipv6":
+            kind = "ipv6"
+            p = canonical_proxy(raw, kind)
+            info("Проверка показала, что прокси выходит в интернет через IPv6 — запомнил это")
+        bad(r["reason"])
+        if not r.get("alive"):
+            info("Проверьте у продавца прокси: тип (SOCKS5 или HTTP), порт, срок действия и привязку к вашему IP")
         c = choose("Что дальше?", [("Ввести другой прокси", ""), ("Сохранить этот прокси и проверить при запуске", ""),
                                     ("Продолжить без прокси", "")], default=1)
         if c == 2:
-            return normalize_proxy(p), False
+            return p, False
         if c == 3:
             return "", False
 

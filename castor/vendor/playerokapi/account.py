@@ -110,7 +110,11 @@ class Account:
         self.proxy = proxy
         """Прокси."""
 
-        self.__proxy_string = f"http://{self.proxy.replace('https://', '').replace('http://', '')}" if self.proxy else None
+        # FPCastor: socks5/socks5h/socks4 оставляем как есть, остальное — http
+        if self.proxy and self.proxy.split("://")[0].lower() in ("socks5", "socks5h", "socks4", "socks4a"):
+            self.__proxy_string = self.proxy
+        else:
+            self.__proxy_string = f"http://{self.proxy.replace('https://', '').replace('http://', '')}" if self.proxy else None
         """Строка прокси."""
 
         self.base_url = "https://playerok.com"

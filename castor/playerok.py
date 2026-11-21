@@ -41,7 +41,8 @@ class PlayerokBridge:
             kw["user_agent"] = a.get("user_agent") or self.cfg.get("playerok.user_agent") or DEFAULT_UA
         proxy = (a.get("proxy") or self.cfg.get("playerok.proxy", "")).strip()
         if "proxy" in params and proxy:
-            kw["proxy"] = proxy
+            from .core import proxy_url
+            kw["proxy"] = proxy_url(proxy)
         acc = Account(**kw)
         self.acc = acc.get() if hasattr(acc, "get") else acc
         from .core import quiet_libraries

@@ -477,11 +477,12 @@ function featuresView() {
 function togEv(e, on) { const a = new Set(CFG.features.webhooks.events || []); on ? a.add(e) : a.delete(e); CFG.features.webhooks.events = [...a]; setDirty(true); }
 
 /* бот и прокси — применяются сразу */
-let PROXY_RES = {};
+let PROXY_RES = {}, PROXY_INFO = {}, PROXY_KINDS = {auto: "авто", ipv4: "IPv4", ipv4_shared: "IPv4 Shared", ipv6: "IPv6"};
 async function botView() {
   const px = await api("proxy");
   const t = px.telegram, pc = CFG.telegram.proxy;
   Object.assign(PROXY_RES, px.results || {});
+  PROXY_INFO = px.info || {}; if (px.kinds) PROXY_KINDS = px.kinds;
   view(`${title("Бот и прокси")}
     <div class="group"><div class="item"><span class="ic">🤖</span><div class="tx"><b>${t.username ? "@" + H(t.username) : "Бот не подключён"}</b>
       <span>${t.ok ? "на связи" : H(t.error || "нет связи")} · ${H(px.label)}</span></div><span class="dot ${t.ok ? "ok" : "bad"}"></span></div>
@@ -495,16 +496,21 @@ ${can("secrets") ? `      <div class="field"><label for="ntok">Токен бот
       ${tog("telegram.proxy.failover", "Автопереключение", "если прокси умер — бот сам возьмёт следующий рабочий", "pc().failover=this.checked;applyTG()")}
       ${tog("telegram.proxy.allow_direct", "Пробовать напрямую, если все прокси упали", "", "pc().allow_direct=this.checked;applyTG()")}
       ${pc.list.map((p, i) => { const r = PROXY_RES[p]; const cur = p === px.current;
-        return `<div class="item"><span class="ic">${r ? (r.ok ? "✅" : "❌") : "▫️"}</span><div class="tx"><b>${H(label(p))}${cur ? " · сейчас" : ""}</b>
-          <span>${r ? (r.ok ? r.info + " мс" : H(r.info)) : "не проверялся"}</span></div>
-          <div class="row">${i ? `<button class="btn ghost sm" aria-label="Сделать первым" onclick="moveProxy(${i})">↑</button>` : ""}
+        const inf = PROXY_INFO[p] || {};
+        return `<div class="item px"><span class="ic">${r ? (r.ok ? "✅" : "❌") : "▫️"}</span><div class="tx"><b>${H(label(p))}${cur ? " · сейчас" : ""}</b>
+          <span>${r ? (r.ok ? r.info + " мс" : H(r.info)) : "не проверялся"}${inf.desc ? " · " + H(inf.desc) : ""}</span></div>
+          <div class="row pxa"><select class="sm" aria-label="Тип прокси" onchange="setKind(${i},this.value)">${Object.entries(PROXY_KINDS).map(([k, t]) =>
+            `<option value="${k}"${(inf.kind || "auto") === k ? " selected" : ""}>${k === "auto" ? "Авто" : H(t)}</option>`).join("")}</select>${i ? `<button class="btn ghost sm" aria-label="Сделать первым" onclick="moveProxy(${i})">↑</button>` : ""}
           <button class="btn ghost sm" onclick="useProxy(${i})">Использовать</button><button class="btn danger sm" aria-label="Удалить" onclick="delProxy(${i})">✕</button></div></div>`; }).join("")}
-      <div class="field"><label for="npx">Добавить прокси</label><div class="row"><input id="npx" placeholder="socks5://user:pass@1.2.3.4:1080" style="flex:1"><button class="btn sm" onclick="addProxy()">Добавить</button></div>
-        <div class="note">Форматы: socks5://user:pass@ip:port · http://ip:port · ip:port:user:pass. MTProto-прокси Bot API не поддерживает. Можно вставить сразу несколько, каждый с новой строки.</div></div></div>
+      <div class="field"><label for="npx">Добавить прокси</label>
+        <textarea id="npx" rows="3" placeholder="1.2.3.4:8000:логин:пароль" oninput="previewProxy()"></textarea>
+        <div class="row" style="margin-top:8px"><select id="npxk" aria-label="Тип прокси" style="flex:1" onchange="previewProxy()">${Object.entries(PROXY_KINDS).map(([k, t]) =>
+          `<option value="${k}">${k === "auto" ? "Тип: определить автоматически" : H(t)}</option>`).join("")}</select><button class="btn sm" onclick="addProxy()">Добавить</button></div>
+        <div class="note" id="npxp">Вставьте прокси в любом виде — бот сам приведёт запись к нужному формату: ip:порт:логин:пароль, логин:пароль@ip:порт, socks5://…, IPv6 или блок «IP / Порт / Логин / Пароль» из кабинета продавца. Несколько прокси — каждый с новой строки. MTProto-прокси Bot API не поддерживает.</div></div></div>
     <div class="row"><button class="btn ghost" onclick="testAll()">Проверить все</button><button class="btn" onclick="applyTG()">Переподключиться</button></div>`);
 }
 const pc = () => CFG.telegram.proxy;
-function label(p) { return (p.includes("://") ? p.split("://")[1] : p).split("@").pop(); }
+function label(p) { return (PROXY_INFO[p] && PROXY_INFO[p].label) || (p.includes("://") ? p.split("://")[1] : p).split("#")[0].split("@").pop(); }
 async function testToken() {
   const tok = $("#ntok").value.trim();
   const j = await api("telegram/test_token", {token: tok}); if (j.ok) { toast("Токен рабочий: @" + j.username); haptic(); }
@@ -522,8 +528,26 @@ async function applyTG(extra = {}) {
   if (j.ok) haptic(); else haptic("error");
   await loadCfg(); botView();
 }
+let _pvT;
+function previewProxy() {
+  clearTimeout(_pvT);
+  _pvT = setTimeout(async () => {
+    const text = $("#npx").value.trim(), out = $("#npxp"); if (!out) return;
+    if (!text) return;
+    const j = await api("proxy/parse", {text, kind: $("#npxk").value});
+    out.innerHTML = [...(j.items || []).map(x => "✓ Распознал: " + H(x.desc)), ...(j.bad || []).map(b => "✕ Не понял: " + H(b))].join("<br>");
+  }, 350);
+}
+async function setKind(i, kind) {
+  const j = await api("proxy/kind", {i, kind}); if (!j.ok) return;
+  toast("Тип: " + (kind === "auto" ? "авто" : PROXY_KINDS[kind])); await loadCfg(); botView();
+}
 async function addProxy() {
-  const v = $("#npx").value.split("\n").map(s => s.trim()).filter(Boolean); if (!v.length) return;
+  const text = $("#npx").value.trim(); if (!text) return;
+  const pj = await api("proxy/parse", {text, kind: $("#npxk").value});
+  if (pj.bad && pj.bad.length) toast("Не понял: " + pj.bad[0].slice(0, 40) + " — нужны хотя бы IP и порт");
+  const v = (pj.items || []).map(x => x.proxy); if (!v.length) return;
+  toast("Проверяю " + v.length + " шт…");
   const j = await api("proxy/test", {list: v, direct: false});
   j.results.forEach(r => PROXY_RES[r.proxy] = r);
   pc().list.push(...v); pc().enabled = true;

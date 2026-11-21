@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 import time
 
-from .core import Config, check_proxy, diagnose_proxy, log, normalize_proxy, proxy_label
+from .core import Config, check_proxy, diagnose_proxy, log, proxy_label, proxy_url
 
 
 class ProxyManager:
@@ -30,7 +30,7 @@ class ProxyManager:
     def _use(self, p: str) -> str:
         """Подставляет тот тип подключения (socks5h/socks5/http), который сработал при проверке."""
         r = self.results.get(p) or {}
-        return r.get("variant") or p
+        return r.get("variant") or proxy_url(p)
 
     def test_all(self) -> list:
         out = []
@@ -71,7 +71,7 @@ class ProxyManager:
     def apihelper_value(self):
         if not self.current:
             return None
-        n = normalize_proxy(self._use(self.current))
+        n = self._use(self.current)
         return {"https": n, "http": n}
 
     def label(self) -> str:
